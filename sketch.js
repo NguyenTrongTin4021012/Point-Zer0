@@ -266,8 +266,8 @@ function drawInstructions() {
   textAlign(CENTER, CENTER);
   text(creationText, width / 2, topBoxY + topBoxHeight / 2);
 
-  // Navigation guide (bottom, simplified)
-  let navigationText = "Pan: Mouse/Arrows   Select: Click";
+  // Navigation & actions guide (bottom, expanded)
+  let navigationText = "Pan: Mouse/Arrows   Select: Click   H: Recenter   Backspace: Delete Last   Delete: Delete All   Esc: Restart";
   let bottomBoxHeight = 40;
   let bottomBoxY = height - bottomBoxHeight;
   noStroke();
