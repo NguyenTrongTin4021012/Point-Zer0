@@ -23,6 +23,7 @@ let panLeft = false, panRight = false, panUp = false, panDown = false;
 let labelAnimStart = 0;
 let labelAnimDuration = 200;
 let labelAnimActive = false;
+let labelAnimReverse = false;
 let labelLineStart = null;
 let labelLineEnd = null;
 const MAX_PAN_VEL = 1000;
@@ -50,6 +51,7 @@ function preload() {
 }
 function setup() {
   createCanvas(windowWidth, windowHeight);
+  colorMode(RGB, 255, 255, 255, 255); // Switch to RGB color mode
   if (kodeMonoFont) {
     textFont(kodeMonoFont);
   } else {
@@ -58,6 +60,7 @@ function setup() {
   galaxyW = windowWidth * 6;
   galaxyH = windowHeight * 6;
   galaxyBuffer = createGraphics(galaxyW, galaxyH);
+  galaxyBuffer.colorMode(RGB, 255, 255, 255, 255); // Also set for buffer
   // Generate stars using typed arrays
   for (let i = 0; i < 1200; i++) {
     starsX[i] = random(galaxyW);
@@ -83,41 +86,28 @@ function setup() {
 // 3. Main Rendering Loop
 // =========================
 function draw() {
+  const w2 = width >> 1, h2 = height >> 1;
   background(5, 5, 5);
+  cursor(CROSS);
   if (showLanding) {
     drawLandingScreen();
     return;
   }
+  // Cache offset and zoom calculations
+  let ox = offsetX, oy = offsetY, gw = galaxyW, gh = galaxyH, zl = zoomLevel;
   push();
-  translate(width / 2, height / 2);
-  // Draw main buffer
-  image(galaxyBuffer, -offsetX, -offsetY, galaxyW, galaxyH);
-  // Draw wraparound buffers for seamless edges
-  if (offsetX < width / 2) {
-    image(galaxyBuffer, -offsetX + galaxyW, -offsetY, galaxyW, galaxyH);
-  }
-  if (offsetX > galaxyW - width / 2) {
-    image(galaxyBuffer, -offsetX - galaxyW, -offsetY, galaxyW, galaxyH);
-  }
-  if (offsetY < height / 2) {
-    image(galaxyBuffer, -offsetX, -offsetY + galaxyH, galaxyW, galaxyH);
-  }
-  if (offsetY > galaxyH - height / 2) {
-    image(galaxyBuffer, -offsetX, -offsetY - galaxyH, galaxyW, galaxyH);
-  }
-  // Draw corners for full seamlessness
-  if (offsetX < width / 2 && offsetY < height / 2) {
-    image(galaxyBuffer, -offsetX + galaxyW, -offsetY + galaxyH, galaxyW, galaxyH);
-  }
-  if (offsetX > galaxyW - width / 2 && offsetY < height / 2) {
-    image(galaxyBuffer, -offsetX - galaxyW, -offsetY + galaxyH, galaxyW, galaxyH);
-  }
-  if (offsetX < width / 2 && offsetY > galaxyH - height / 2) {
-    image(galaxyBuffer, -offsetX + galaxyW, -offsetY - galaxyH, galaxyW, galaxyH);
-  }
-  if (offsetX > galaxyW - width / 2 && offsetY > galaxyH - height / 2) {
-    image(galaxyBuffer, -offsetX - galaxyW, -offsetY - galaxyH, galaxyW, galaxyH);
-  }
+  translate(w2, h2);
+  scale(zl);
+  image(galaxyBuffer, -ox, -oy, gw, gh);
+  // Only check wraparound if near edge (avoid unnecessary checks)
+  if (ox < w2) image(galaxyBuffer, -ox + gw, -oy, gw, gh);
+  if (ox > gw - w2) image(galaxyBuffer, -ox - gw, -oy, gw, gh);
+  if (oy < h2) image(galaxyBuffer, -ox, -oy + gh, gw, gh);
+  if (oy > gh - h2) image(galaxyBuffer, -ox, -oy - gh, gw, gh);
+  if (ox < w2 && oy < h2) image(galaxyBuffer, -ox + gw, -oy + gh, gw, gh);
+  if (ox > gw - w2 && oy < h2) image(galaxyBuffer, -ox - gw, -oy + gh, gw, gh);
+  if (ox < w2 && oy > gh - h2) image(galaxyBuffer, -ox + gw, -oy - gh, gw, gh);
+  if (ox > gw - w2 && oy > gh - h2) image(galaxyBuffer, -ox - gw, -oy - gh, gw, gh);
   pop();
   handlePanning();
   drawLabel();
@@ -125,11 +115,9 @@ function draw() {
   drawMouseCoords();
 }
 function drawLandingScreen() {
-  if (kodeMonoFont) {
-    textFont(kodeMonoFont);
-  } else {
-    textFont('monospace');
-  }
+  // Cache font and text settings
+  let cachedFont = kodeMonoFont || 'monospace';
+  textFont(cachedFont);
   fill(255, 255, 255, 230);
   rect(0, 0, width, height);
   fill(30, 30, 30);
@@ -143,14 +131,41 @@ function drawLandingScreen() {
   let baseStarSize = 70;
   let starSize = (baseStarSize + starExplosionProgress * 60) * oscSize;
   let starAlpha = 255 - starExplosionProgress * 180;
+  // Glitch logic
+  // Use a single global for glitch state
+  if (!window.starGlitch) {
+    window.starGlitch = {active: false, next: millis() + random(1800, 4000), end: 0, scale: 1, rot: 0};
+  }
+  let glitch = window.starGlitch;
+  let now = millis();
+  if (!glitch.active && now > glitch.next) {
+    glitch.active = true;
+    glitch.end = now + random(30, 70);
+    glitch.scale = random(0.7, 1.3);
+    glitch.rot = random(-0.5, 0.5);
+  }
+  if (glitch.active && now > glitch.end) {
+    glitch.active = false;
+    glitch.next = now + random(1800, 4000);
+  }
+  let drawCx = cx, drawCy = cy, drawSize = starSize, drawRot = starExplosionProgress * PI / 6 + oscRot;
+  if (glitch.active) {
+    drawCx += random(-18, 18);
+    drawCy += random(-18, 18);
+    drawSize *= glitch.scale;
+    drawRot += glitch.rot;
+  }
   push();
-  translate(cx, cy);
-  rotate(starExplosionProgress * PI / 6 + oscRot);
+  translate(drawCx, drawCy);
+  rotate(drawRot);
   noStroke();
-  fill(5, 5, 5, starAlpha);
+  let glitchColor = glitch.active
+    ? ([ [255,40,40], [40,255,40], [40,40,255] ])[Math.floor(Math.random()*3)]
+    : [5,5,5];
+  fill(glitchColor[0], glitchColor[1], glitchColor[2], starAlpha);
   for (let d = -1; d <= 1; d += 2) {
-    triangle(0, d * starSize, -starSize * 0.22, 0, starSize * 0.22, 0);
-    triangle(d * starSize, 0, 0, -starSize * 0.22, 0, starSize * 0.22);
+    triangle(0, d * drawSize, -drawSize * 0.22, 0, drawSize * 0.22, 0);
+    triangle(d * drawSize, 0, 0, -drawSize * 0.22, 0, drawSize * 0.22);
   }
   pop();
   if (starExploding) {
@@ -179,10 +194,10 @@ function drawLandingScreen() {
 // =========================
 function handlePanning() {
   const panStep = 30;
-  if (panLeft) offsetX += panStep;
-  if (panRight) offsetX -= panStep;
-  if (panUp) offsetY += panStep;
-  if (panDown) offsetY -= panStep;
+  if (panLeft) offsetX -= panStep;
+  if (panRight) offsetX += panStep;
+  if (panUp) offsetY -= panStep;
+  if (panDown) offsetY += panStep;
   offsetX += panVX;
   offsetY += panVY;
   panVX *= 0.97;
@@ -200,47 +215,90 @@ function handlePanning() {
 // =========================
 // 5. Label & Info Display
 // =========================
-function drawLabel() {
-  if (kodeMonoFont) {
-    textFont(kodeMonoFont);
-  } else {
-    textFont('monospace');
+let prevSelectedObject = null, prevSelectedType = "", prevSelectedName = "", prevLabelLineStart = null, prevLabelLineEnd = null;
+function getBorderScale(type) {
+  switch (type) {
+    case "nebula": return 0.5;
+    case "galaxy": return 1;
+    case "starcluster": return 1;
+    case "quasar": return 4;
+    case "blackhole":
+    case "pulsar": return 6;
+    default: return 1;
   }
-  if (selectedObject && labelLineEnd && labelLineStart) {
+}
+function drawLabel() {
+  textFont(kodeMonoFont || 'monospace');
+  let obj = labelAnimReverse && prevSelectedObject ? prevSelectedObject : selectedObject;
+  let type = labelAnimReverse && prevSelectedType ? prevSelectedType : selectedType;
+  let name = labelAnimReverse && prevSelectedName ? prevSelectedName : selectedName;
+  let lineStart = labelAnimReverse && prevLabelLineStart ? prevLabelLineStart : labelLineStart;
+  let lineEnd = labelAnimReverse && prevLabelLineEnd ? prevLabelLineEnd : labelLineEnd;
+  if (obj && lineEnd && lineStart) {
     let animProgress = min(1, (millis() - labelAnimStart) / labelAnimDuration);
-    let gap = 48;
-    let dx = labelLineEnd.x - labelLineStart.x;
-    let dy = labelLineEnd.y - labelLineStart.y;
-    let dist = sqrt(dx * dx + dy * dy);
-    let stopRatio = dist > gap ? (dist - gap) / dist : 0.95;
-    let stopX = labelLineStart.x + dx * stopRatio;
-    let stopY = labelLineStart.y + dy * stopRatio;
-    let animStopX = labelLineStart.x + (stopX - labelLineStart.x) * animProgress;
-    let animStopY = labelLineStart.y + (stopY - labelLineStart.y) * animProgress;
-    push();
-    stroke(255, 200);
-    strokeWeight(1.2);
-    line(labelLineStart.x, labelLineStart.y, animStopX, animStopY);
-    if (!labelAnimActive || animProgress >= 1) {
-      line(labelLineStart.x, labelLineStart.y, stopX, stopY);
+    if (labelAnimReverse) animProgress = 1 - animProgress;
+    let r = obj.r || 40;
+    let borderScale = getBorderScale(type);
+    let side = r * zoomLevel * borderScale;
+    let half = side / 2;
+    let len = side * 0.22;
+    let objScreenX = (obj.x - offsetX) + width / 2;
+    let objScreenY = (obj.y - offsetY) + height / 2;
+    // Clamp border to viewport
+    objScreenX = constrain(objScreenX, half + 2, width - half - 2);
+    objScreenY = constrain(objScreenY, half + 2, height - half - 2);
+    let wipeLen = len * animProgress;
+    blendMode(DIFFERENCE);
+    stroke(255, 255, 0, 230);
+    strokeWeight(3);
+    noFill();
+    // Border corners (clamped)
+    line(objScreenX - half, objScreenY - half, objScreenX - half + wipeLen, objScreenY - half);
+    line(objScreenX - half, objScreenY - half, objScreenX - half, objScreenY - half + wipeLen);
+    line(objScreenX + half, objScreenY - half, objScreenX + half - wipeLen, objScreenY - half);
+    line(objScreenX + half, objScreenY - half, objScreenX + half, objScreenY - half + wipeLen);
+    line(objScreenX - half, objScreenY + half, objScreenX - half + wipeLen, objScreenY + half);
+    line(objScreenX - half, objScreenY + half, objScreenX - half, objScreenY + half - wipeLen);
+    line(objScreenX + half, objScreenY + half, objScreenX + half - wipeLen, objScreenY + half);
+    line(objScreenX + half, objScreenY + half, objScreenX + half, objScreenY + half - wipeLen);
+    blendMode(BLEND);
+    // Label text
+    if (!labelAnimReverse && animProgress >= 1) {
       fill(255);
       stroke(40, 20, 0, 180);
       strokeWeight(2);
       textSize(28);
-      textAlign(CENTER, BOTTOM);
-      text(selectedName, labelLineEnd.x, labelLineEnd.y);
+      textAlign(LEFT, TOP);
+      let labelX = objScreenX + half + 16;
+      let labelY = objScreenY - half;
+      // Clamp label to viewport (right and bottom edges)
+      let labelWidth = textWidth(name) + 8;
+      let labelHeight = 28 + 20 + 8;
+      if (labelX + labelWidth > width) labelX = width - labelWidth;
+      if (labelY + labelHeight > height) labelY = height - labelHeight;
+      if (labelX < 0) labelX = 0;
+      if (labelY < 0) labelY = 0;
+      text(name, labelX, labelY);
       textSize(20);
       noStroke();
       fill(200);
       let classLabel = "";
-      if (selectedType === "galaxy") classLabel = "Galaxy";
-      else if (selectedType === "blackhole") classLabel = "Black Hole";
-      else if (selectedType === "nebula") classLabel = "Nebula";
-      else if (selectedType === "starcluster") classLabel = "Star Cluster";
-      else if (selectedType === "pulsar") classLabel = "Pulsar";
-      else if (selectedType === "quasar") classLabel = "Quasar";
-      text(classLabel, labelLineEnd.x, labelLineEnd.y + 28);
+      if (type === "galaxy") classLabel = "Galaxy";
+      else if (type === "blackhole") classLabel = "Black Hole";
+      else if (type === "nebula") classLabel = "Nebula";
+      else if (type === "starcluster") classLabel = "Star Cluster";
+      else if (type === "pulsar") classLabel = "Pulsar";
+      else if (type === "quasar") classLabel = "Quasar";
+      text(classLabel, labelX, labelY + 28);
       labelAnimActive = false;
+    }
+    if (labelAnimReverse && animProgress <= 0) {
+      labelAnimActive = false;
+      prevSelectedObject = null;
+      prevSelectedType = "";
+      prevSelectedName = "";
+      prevLabelLineStart = null;
+      prevLabelLineEnd = null;
     }
     pop();
   }
@@ -254,29 +312,41 @@ function drawInstructions() {
   } else {
     textFont('monospace');
   }
+  // Responsive sizing
+  let boxHeight = max(28, min(0.045 * height, 44));
+  let fontSize = max(12, min(0.018 * width, 22));
   // Creation guide (top, simplified)
-  let creationText = "1: Nebula   2: Galaxy   3: Blackhole   4: Star Cluster   5: Pulsar   6: Quasar";
-  let topBoxHeight = 40;
+  let creationText = "1: Nebula   2: Galaxy   3: Blackhole   4: Star Cluster   5: Pulsar   6: Quasar   7: Size   8: Density   9: Color";
   let topBoxY = 0;
   noStroke();
   fill(10, 10, 10, 100);
-  rect(0, topBoxY, width, topBoxHeight);
+  rect(0, topBoxY, width, boxHeight);
   fill(255);
-  textSize(20);
+  textSize(fontSize);
   textAlign(CENTER, CENTER);
-  text(creationText, width / 2, topBoxY + topBoxHeight / 2);
+  // Shrink font if text is too wide
+  let maxTextWidth = width - 32;
+  let actualFontSize = fontSize;
+  while (textWidth(creationText) > maxTextWidth && actualFontSize > 10) {
+    actualFontSize -= 1;
+    textSize(actualFontSize);
+  }
+  text(creationText, width / 2, topBoxY + boxHeight / 2);
 
   // Navigation & actions guide (bottom, expanded)
-  let navigationText = "Pan: Mouse/Arrows   Select: Click   H: Recenter   Backspace: Delete Last   Delete: Delete All   Esc: Restart";
-  let bottomBoxHeight = 40;
-  let bottomBoxY = height - bottomBoxHeight;
+  let navigationText = "Pan: Mouse/WASD/Arrows   Select: Click   H: Recenter   +/-: Zoom   Backspace: Delete Last   Delete: Delete All   Esc: Restart";
+  let bottomBoxY = height - boxHeight;
   noStroke();
   fill(10, 10, 10, 100);
-  rect(0, bottomBoxY, width, bottomBoxHeight);
+  rect(0, bottomBoxY, width, boxHeight);
   fill(255);
-  textSize(20);
-  textAlign(CENTER, CENTER);
-  text(navigationText, width / 2, bottomBoxY + bottomBoxHeight / 2);
+  textSize(fontSize);
+  actualFontSize = fontSize;
+  while (textWidth(navigationText) > maxTextWidth && actualFontSize > 10) {
+    actualFontSize -= 1;
+    textSize(actualFontSize);
+  }
+  text(navigationText, width / 2, bottomBoxY + boxHeight / 2);
 }
 function drawMouseCoords() {
   if (kodeMonoFont) {
@@ -301,20 +371,21 @@ function drawMouseCoords() {
 // 7. Object Generation
 // =========================
 function addNebula(x, y, doRedraw = true) {
-  const nebSize = random(60, 105);
-  const baseHue = random(360);
-  const baseSat = random(60, 100);
-  const baseBri = random(80, 100);
-  const hueSpread = random(60, 220);
-  const shapeFactor = random(0.5, 3.5);
+  const nebSize = random(420, 630); // 30% smaller
+  // Assign baseHue fully random for each nebula
+  let baseHue = random(360);
+  const baseSat = random(40, 100);
+  const baseBri = random(60, 120);
+  const hueSpread = random(30, 60);
+  const shapeFactor = random(0.4, 4.2);
   const rotation = random(TWO_PI);
   // Store all random properties for drawing
-  const layers = int(random(2, 5));
+  const layers = int(random(2, 7)); // more layers for shape
   const layerSeeds = Array.from({length: layers}, () => random(10000));
-  const layerRads = Array.from({length: layers}, (_, i) => nebSize * map(i, 0, layers - 1, 1, random(1.2, 3.2)));
+  const layerRads = Array.from({length: layers}, (_, i) => nebSize * map(i, 0, layers - 1, 1, random(1.2, 4.2)));
   const layerAlphas = Array.from({length: layers}, (_, i) => map(i, 0, layers - 1, random(30, 140), random(8, 80)));
-  const armCounts = Array.from({length: layers}, () => int(random(1, 15)));
-  const armSpreads = Array.from({length: layers}, () => random(0.2, 4.2));
+  const armCounts = Array.from({length: layers}, () => int(random(2, 22))); // more arms
+  const armSpreads = Array.from({length: layers}, () => random(0.2, 6.2)); // more spread
   const nebulaSeed = random(10000);
   nebulae.push({
     x, y, r: nebSize, baseHue, baseSat, baseBri, hueSpread, shapeFactor,
@@ -332,14 +403,13 @@ function addNebula(x, y, doRedraw = true) {
   if (doRedraw) redrawBuffer();
 }
 function addGalaxy(x, y, doRedraw = true) {
-  const gSize = random(55, 155);
-  const arms = int(random(2, 5));
-  const gHue = random(360);
+  const gSize = random(238, 476); // 30% smaller
+  let gHue = random(360);
+  const arms = int(random(3, 10)); // more arms
   const gSat = random(40, 100);
   const gBri = random(70, 100);
   const rotation = random(TWO_PI);
-  // Store all random properties for drawing
-  const points = int(gSize * random(2.5, 5));
+  const points = int(gSize * random(5, 12)); // much denser
   const armSeeds = Array.from({length: arms}, () => random(10000));
   const armAngles = Array.from({length: arms}, (v, arm) => (TWO_PI / arms) * arm + random(-0.3, 0.3));
   const swirlStrength = random(1.2, 3.2);
@@ -361,17 +431,34 @@ function addGalaxy(x, y, doRedraw = true) {
   if (doRedraw) redrawBuffer();
 }
 // Helper for realistic color selection
-function getGalaxyColor(t) {
-  if (t < 0.2) return color(random(40, 60), random(10, 40), random(220, 255));
-  if (t < 0.7) return color(random(200, 240), random(60, 120), random(180, 240));
-  if (random() < 0.08) return color(random(30, 60), random(10, 40), random(30, 80));
-  return color(random(270, 320), random(80, 160), random(120, 200));
+function getGalaxyColor(t, baseHue) {
+  let hue = (baseHue + t * 60 + random(-20, 20)) % 360;
+  let rgb = hsvToRgb(hue / 360, random(0.7, 1.0), random(0.7, 1.0));
+  return color(rgb[0], rgb[1], rgb[2]);
 }
-function getNebulaColor(type) {
-  if (type < 0.3) return color(random(0, 20), random(80, 160), random(120, 220));
-  if (type < 0.6) return color(random(190, 240), random(80, 160), random(120, 220));
-  if (type < 0.8) return color(random(90, 140), random(60, 120), random(100, 180));
-  return color(random(30, 60), random(10, 40), random(30, 80));
+function getNebulaColor(type, baseHue, hueSpread) {
+  // Map baseHue to RGB
+  let hue = (baseHue + type * hueSpread + random(-8, 8)) % 360;
+  let rgb = hsvToRgb(hue / 360, random(0.7, 1.0), random(0.7, 1.0));
+  return color(rgb[0], rgb[1], rgb[2]);
+}
+// HSV to RGB conversion helper
+function hsvToRgb(h, s, v) {
+  let r, g, b;
+  let i = Math.floor(h * 6);
+  let f = h * 6 - i;
+  let p = v * (1 - s);
+  let q = v * (1 - f * s);
+  let t = v * (1 - (1 - f) * s);
+  switch (i % 6) {
+    case 0: r = v, g = t, b = p; break;
+    case 1: r = q, g = v, b = p; break;
+    case 2: r = p, g = v, b = t; break;
+    case 3: r = p, g = q, b = v; break;
+    case 4: r = t, g = p, b = v; break;
+    case 5: r = v, g = p, b = q; break;
+  }
+  return [int(r * 255), int(g * 255), int(b * 255)];
 }
 function drawGalaxy(g) {
   galaxyBuffer.push();
@@ -403,34 +490,34 @@ function drawGalaxy(g) {
       let py = g.y + sin(angle) * (rad + bulge + dust) + armRandoms[i][6];
       let depth = 1 - constrain(t, 0, 1);
       let alpha = map(t, 0, 1, 255, 60) * (0.7 + 0.6 * depth) * armRandoms[i][8];
-      let col = getGalaxyColor(t);
-      let sw = map(t, 0, 1, 3.5, 1.2) + 2.5 * depth + armRandoms[i][7];
-      galaxyBuffer.stroke(255, 255, 255, alpha * 0.18);
-      galaxyBuffer.strokeWeight(sw * 0.7);
-      galaxyBuffer.point(px + 2, py + 2);
-      galaxyBuffer.stroke(col);
-      galaxyBuffer.strokeWeight(sw);
-      galaxyBuffer.point(px, py);
+      let col = getGalaxyColor(t, g.baseHue);
+  let sw = map(t, 0, 1, 2.2, 0.7) + 1.2 * depth + armRandoms[i][7] * 0.5; // smaller dots
+  galaxyBuffer.stroke(255, 255, 255, alpha * 0.18);
+  galaxyBuffer.strokeWeight(sw * 0.5);
+  galaxyBuffer.point(px + 2, py + 2);
+  galaxyBuffer.stroke(col);
+  galaxyBuffer.strokeWeight(sw * 0.7);
+  galaxyBuffer.point(px, py);
     }
   }
   const burstLen = int(r * random(0.18, 0.38));
   for (let i = 0; i < burstLen; i++) {
     let angle = random(TWO_PI);
-    let rad = random(0, r * random(0.09, 0.19));
+    let rad = random(0, r * random(0.04, 0.09)); // reduced spread for compact core
     let px = g.x + cos(angle) * rad;
     let py = g.y + sin(angle) * rad;
     galaxyBuffer.stroke(255, 255, 255, random(120, 220));
-    galaxyBuffer.strokeWeight(random(10, 18));
+    galaxyBuffer.strokeWeight(random(2.2, 4.2));
     galaxyBuffer.point(px, py);
     let col = color(random(40, 60), random(10, 40), random(220, 255));
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(7, 13));
+    galaxyBuffer.strokeWeight(random(1.2, 2.8));
     galaxyBuffer.point(px, py);
   }
   galaxyBuffer.pop();
 }
 function addBlackhole(x, y, doRedraw = true) {
-  const bhSize = random(30, 60);
+  const bhSize = random(10.5, 14); // 30% smaller
   const rotation = random(TWO_PI);
   // Store all random properties for drawing
   const diskTilt = random(-PI/8, PI/8);
@@ -461,8 +548,8 @@ function drawBlackhole(bh) {
   galaxyBuffer.translate(-bh.x, -bh.y);
   // Use stored random properties
   let bhSeed = random(10000);
-  let points = int(bh.r * random(24, 40)); // Fewer points for disk
-  // Accretion disk
+  let points = int(bh.r * random(24, 40));
+  // Accretion disk (sharper, less blur)
   for (let i = 0; i < points; i++) {
     let t = i / points;
     let swirl = random(2.5, 5.5) * pow(t, 1.5) * PI * sin(bhSeed + t * 2.5);
@@ -470,7 +557,7 @@ function drawBlackhole(bh) {
     let rad = bh.r * (1.2 + t * 2.8 + sin(angle * 2.5) * 0.2);
     let px = bh.x + cos(angle) * rad;
     let py = bh.y + sin(angle) * rad * bh.diskEcc;
-    let alpha = map(t, 0, 1, 200, 10);
+    let alpha = map(t, 0, 1, 255, 60); // higher contrast
     let col;
     if (t < 0.2) {
       col = color(255, 255, 255, alpha);
@@ -482,51 +569,54 @@ function drawBlackhole(bh) {
       col = color(220, 40, 40, alpha);
     }
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(2, 4));
+  galaxyBuffer.strokeWeight(1.2); // smaller dots
     galaxyBuffer.point(px, py);
   }
-  // Black core
-  for (let i = 0; i < bh.corePoints; i++) {
+  // Black core (point-based)
+  for (let i = 0; i < bh.corePoints * 2; i++) {
     let angle = random(TWO_PI);
-    let rad = random(0, bh.r * random(0.2, 0.7));
+    let rad = random(0, bh.r * 0.6);
     let px = bh.x + cos(angle) * rad;
     let py = bh.y + sin(angle) * rad;
     let alpha = random(220, 255);
-    let col = color(random(0, 20), random(0, 20), random(20, 60), alpha);
+    let col = color(10, 10, 20, alpha);
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(2, 5));
+  galaxyBuffer.strokeWeight(1.2);
     galaxyBuffer.point(px, py);
   }
-  // Warped lensing ring
+  // Warped lensing ring (sharper)
   for (let i = 0; i < bh.ringPoints; i++) {
     let angle = random(TWO_PI);
     let rad = bh.r * random(2.5, 3.2);
     let px = bh.x + cos(angle) * rad + sin(angle * 3) * 8;
     let py = bh.y + sin(angle) * rad * bh.ringEcc + cos(angle * 2.5) * 6;
-    let alpha = random(40, 100);
-    let col = color(255, 240 + random(-10, 10), 220 + random(-20, 20), alpha);
+    let alpha = random(120, 220); // higher contrast
+    let col = color(255, 240, 220, alpha);
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(1, 3));
+  galaxyBuffer.strokeWeight(1.2);
     galaxyBuffer.point(px, py);
   }
-  // Relativistic jets
+  // Relativistic jets (dotted streams)
   for (let j = -1; j <= 1; j += 2) {
-    for (let i = 0; i < bh.jetPoints; i++) {
-      let t = i / bh.jetPoints;
-      let px = bh.x + random(-4, 4);
-      let py = bh.y + j * (bh.r * 0.3 + t * bh.jetLen + random(-2, 2));
-      let alpha = map(t, 0, 1, 120, 10);
-      let col = color(180 + random(-20, 20), 220 + random(-20, 20), 255, alpha);
+    for (let i = 0; i < bh.jetPoints * 2; i++) {
+      let t = i / (bh.jetPoints * 2);
+      // More scatter at the end of each jet
+      let scatter = map(t, 0.7, 1, 2, 16);
+      if (t < 0.7) scatter = 2;
+      let px = bh.x + random(-scatter, scatter);
+      let py = bh.y + j * (bh.r * 0.3 + t * bh.jetLen) + random(-scatter, scatter);
+      let alpha = map(t, 0, 1, 220, 60);
+      let col = color(180 + random(-20,20), 220 + random(-20,20), 255, alpha);
       galaxyBuffer.stroke(col);
-      galaxyBuffer.strokeWeight(random(2, 4));
+  galaxyBuffer.strokeWeight(random(0.7, 1.5));
       galaxyBuffer.point(px, py);
     }
   }
   galaxyBuffer.pop();
 }
 function addStarCluster(x, y) {
-  const count = int(random(20, 60));
-  const r = random(40, 90);
+  const count = int(random(60, 140));
+  const r = random(42, 63); // 30% smaller
   const rotation = random(TWO_PI);
   const name = generateName("starcluster");
   starClusters.push({ x, y, r, count, rotation, name });
@@ -543,15 +633,19 @@ function drawStarCluster(sc) {
     let px = sc.x + cos(angle) * rad;
     let py = sc.y + sin(angle) * rad;
     let alpha = map(rad, 0, sc.r, 255, 80);
-    let col = color(255, 255, random(180, 255), alpha);
+    // More randomized color
+    let rCol = random(200, 255);
+    let gCol = random(200, 255);
+    let bCol = random(180, 255) + random(-40, 40);
+    let col = color(rCol, gCol, bCol, alpha);
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(3, 7)); // Increased size
+    galaxyBuffer.strokeWeight(random(2, 5)); // Slightly smaller for more particles
     galaxyBuffer.point(px, py);
   }
   galaxyBuffer.pop();
 }
 function addPulsar(x, y) {
-  const r = random(18, 38);
+  const r = random(10.5, 14); // 30% smaller
   const rotation = random(TWO_PI);
   const name = generateName("pulsar");
   pulsars.push({ x, y, r, rotation, name });
@@ -562,32 +656,44 @@ function drawPulsar(p) {
   galaxyBuffer.translate(p.x, p.y);
   galaxyBuffer.rotate(p.rotation || 0);
   galaxyBuffer.translate(-p.x, -p.y);
-  for (let i = 0; i < 10; i++) {
+  // Compact, bright core
+  for (let i = 0; i < 40; i++) {
     let angle = random(TWO_PI);
-    let rad = random(0, p.r * 0.3);
+    let rad = random(0, p.r * 0.25);
     let px = p.x + cos(angle) * rad;
     let py = p.y + sin(angle) * rad;
-    let col = color(255, 255, 220, random(200, 255));
+    let col = color(255, 255, random(180, 255), random(220,255));
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(4, 8)); // Increased size
+    galaxyBuffer.strokeWeight(random(2, 5));
     galaxyBuffer.point(px, py);
   }
-  for (let i = 0; i < 2; i++) {
-    let angle = i * PI;
-    for (let j = 0; j < 32; j++) {
-      let t = j / 32;
-      let bx = p.x + cos(angle) * p.r * (1.5 + t * 6.5);
-      let by = p.y + sin(angle) * p.r * (1.5 + t * 6.5);
-      let col = color(120, 200, 255, map(t, 0, 1, 220, 40));
+  // Faint elliptical halo
+  for (let i = 0; i < 30; i++) {
+    let angle = random(TWO_PI);
+    let rad = p.r * random(0.7, 1.2);
+    let px = p.x + cos(angle) * rad * 1.2;
+    let py = p.y + sin(angle) * rad * 0.7;
+    let col = color(180, 220, 255, random(30, 80));
+    galaxyBuffer.stroke(col);
+    galaxyBuffer.strokeWeight(random(1, 2));
+    galaxyBuffer.point(px, py);
+  }
+  // Two narrow, straight jets
+  for (let j = -1; j <= 1; j += 2) {
+    for (let i = 0; i < 40; i++) {
+      let t = i / 40;
+      let bx = p.x;
+      let by = p.y + j * (p.r * 0.5 + t * p.r * 7.5);
+      let col = color(120, 200, 255, map(t, 0, 1, 220, 30));
       galaxyBuffer.stroke(col);
-      galaxyBuffer.strokeWeight(3.5); // Increased size
+      galaxyBuffer.strokeWeight(2.5 + random(-1, 1));
       galaxyBuffer.point(bx, by);
     }
   }
   galaxyBuffer.pop();
 }
 function addQuasar(x, y) {
-  const r = random(30, 60);
+  const r = random(21, 42); // 30% smaller
   const rotation = random(TWO_PI);
   const name = generateName("quasar");
   quasars.push({ x, y, r, rotation, name });
@@ -598,33 +704,50 @@ function drawQuasar(q) {
   galaxyBuffer.translate(q.x, q.y);
   galaxyBuffer.rotate(q.rotation || 0);
   galaxyBuffer.translate(-q.x, -q.y);
-  for (let i = 0; i < 38; i++) {
+  // Large, diffuse core (more dots, higher alpha)
+  for (let i = 0; i < 220; i++) {
     let angle = random(TWO_PI);
-    let rad = random(0, q.r * 0.9);
-    let px = q.x + cos(angle) * rad;
-    let py = q.y + sin(angle) * rad;
-    let col = color(255, 220, 80, random(180, 255));
+    let rad = random(0, q.r * 0.95);
+    let px = q.x + cos(angle) * rad * random(1.0, 1.3);
+    let py = q.y + sin(angle) * rad * random(1.0, 1.3);
+    let col = color(255, random(180,255), random(80,180), random(210,255));
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(5, 10)); // Increased size
+    galaxyBuffer.strokeWeight(random(1.2, 2.8));
     galaxyBuffer.point(px, py);
   }
-  for (let i = 0; i < 24; i++) {
-    let t = i / 24;
-    let bx = q.x;
-    let by = q.y - (q.r * 0.7 + t * q.r * 4.2);
-    let col = color(255, 255, 200, map(t, 0, 1, 220, 40));
-    galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(6); // Increased size
-    galaxyBuffer.point(bx, by);
-  }
-  for (let i = 0; i < 32; i++) {
+  // Bright, wide accretion disk (more dots, higher alpha)
+  for (let i = 0; i < 200; i++) {
     let angle = random(TWO_PI);
-    let rad = random(q.r * 1.0, q.r * 2.2);
-    let px = q.x + cos(angle) * rad;
-    let py = q.y + sin(angle) * rad;
-    let col = color(255, 220, 80, random(18, 40));
+    let rad = q.r * random(1.2, 2.8);
+    let px = q.x + cos(angle) * rad * 2.2;
+    let py = q.y + sin(angle) * rad * 0.5;
+    let col = color(255, 255, random(80,180), random(140,220));
     galaxyBuffer.stroke(col);
-    galaxyBuffer.strokeWeight(random(2, 4)); // Increased size
+    galaxyBuffer.strokeWeight(random(0.8, 1.8));
+    galaxyBuffer.point(px, py);
+  }
+  // Two broad, curved jets
+  for (let j = -1; j <= 1; j += 2) {
+    for (let i = 0; i < 60; i++) {
+      let t = i / 60;
+      let curve = sin(t * PI) * 38 * j;
+      let bx = q.x + curve;
+      let by = q.y + j * (q.r * 0.7 + t * q.r * 14.2);
+      let col = color(255, 255, 200, map(t, 0, 1, 220, 30));
+      galaxyBuffer.stroke(col);
+  galaxyBuffer.strokeWeight(1.2 + random(-0.5, 0.5));
+      galaxyBuffer.point(bx, by);
+    }
+  }
+  // Dramatic halo (more dots, higher alpha)
+  for (let i = 0; i < 320; i++) {
+    let angle = random(TWO_PI);
+    let rad = random(q.r * 1.8, q.r * 4.2);
+    let px = q.x + cos(angle) * rad * random(0.8, 1.5);
+    let py = q.y + sin(angle) * rad * random(0.7, 1.3);
+    let col = color(255, 220, 80, random(40, 110));
+    galaxyBuffer.stroke(col);
+    galaxyBuffer.strokeWeight(random(0.7, 1.5));
     galaxyBuffer.point(px, py);
   }
   galaxyBuffer.pop();
@@ -640,25 +763,21 @@ function redrawBuffer() {
   for (let q of quasars) drawQuasar(q);
   galaxyBuffer.blendMode(BLEND);
   colorMode(RGB, 255);
-  // Use typed arrays for stars
+  // Use points for stars
   for (let i = 0; i < 1200; i++) {
-    galaxyBuffer.noStroke();
-    galaxyBuffer.fill(255, 255, starsB[i], 230);
-    galaxyBuffer.ellipse(starsX[i], starsY[i], starsR[i]);
+    galaxyBuffer.stroke(255, 255, starsB[i], 230);
+    galaxyBuffer.strokeWeight(starsR[i]);
+    galaxyBuffer.point(starsX[i], starsY[i]);
   }
 }
 // =========================
 // 8. Utility Functions
 // =========================
 function drawEllipse(buffer, x, y, w, h, col, strokeCol = null, strokeW = 1) {
-  if (strokeCol) {
-    buffer.stroke(strokeCol);
-    buffer.strokeWeight(strokeW);
-  } else {
-    buffer.noStroke();
-  }
-  buffer.fill(col);
-  buffer.ellipse(x, y, w, h);
+  // Point-only rendering for all items
+  buffer.stroke(col);
+  buffer.strokeWeight(strokeW);
+  buffer.point(x, y);
 }
 function generateName(type) {
   const nebulaPrefixes = ["Zeta", "Orion", "Vega", "Cygnus", "Nova", "Astra", "Nebul", "Luma", "Pyra", "Xylo", "Epsilon", "Delta", "Theta", "Lyra", "Sirius", "Altair", "Draco", "Hydra", "Aurora", "Celest"];
@@ -695,46 +814,72 @@ function drawNebula(n) {
   const layersLen = n.layers;
   for (let layer = 0; layer < layersLen; layer++) {
     const layerSeed = n.layerSeeds[layer];
-    const steps = 48;
-    const layerRad = n.layerRads[layer];
+    const points = 180 + int(random(-40, 60));
+    const layerRad = n.layerRads[layer] * 0.65; // reduce spread for compactness
     const layerAlpha = n.layerAlphas[layer];
     const armCount = n.armCounts[layer];
-    const armSpread = n.armSpreads[layer];
-    let layerRandoms = Array(steps);
-    for (let a = 0; a < steps; a++) {
-      layerRandoms[a] = [random(), random(0, 60), random(-30, 30), random(0, 40), random(-20, 20)];
+    const armSpread = n.armSpreads[layer] * 0.6; // tighten filaments
+    // --- Mix polar and cartesian clouds, filaments, and voids ---
+  let cloudGroups = int(random(2, 5)); // fewer, larger clusters
+    for (let g = 0; g < cloudGroups; g++) {
+  let cx = n.x + random(-layerRad * 0.9, layerRad * 0.9);
+  let cy = n.y + random(-layerRad * 0.9, layerRad * 0.9);
+  let groupRad = layerRad * random(0.28, 0.65); // larger clusters
+  let groupPoints = int(points / cloudGroups * random(1.2, 2.2)); // denser clusters
+      for (let i = 0; i < groupPoints; i++) {
+        // Cartesian cluster
+        let px = cx + random(-groupRad, groupRad) + random(-18, 18);
+        let py = cy + random(-groupRad, groupRad) + random(-18, 18);
+        if (random() < 0.7) {
+          let colorType = random();
+          let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+          let distFromCore = dist(px, py, n.x, n.y);
+          let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+          let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 5.2, 18) * density * random(0.8, 1.5);
+          galaxyBuffer.stroke(red(col) + random(-40,40), green(col) + random(-40,40), blue(col) + random(-40,40), alpha);
+          galaxyBuffer.strokeWeight(random(1.2, 2.2));
+          galaxyBuffer.point(px, py);
+        }
+      }
     }
-    for (let a = 0; a < steps; a++) {
-      let angle = map(a, 0, steps, 0, TWO_PI);
-      let freq1 = 12, freq2 = 24, freq3 = 36, freq4 = 48;
-      let noise1 = noise(layerSeed + cos(angle) * freq1, layerSeed + sin(angle) * freq1);
-      let noise2 = noise(layerSeed + cos(angle) * freq2, layerSeed + sin(angle) * freq2);
-      let noise3 = noise(layerSeed + cos(angle) * freq3, layerSeed + sin(angle) * freq3);
-      let noise4 = noise(layerSeed + cos(angle) * freq4, layerSeed + sin(angle) * freq4);
-      let armMod = sin(angle * armCount + layerSeed) * armSpread * 1.0;
-      let noiseRad = layerRad * (0.18 + 1.7 * noise1 + 1.3 * noise2 + 0.7 * noise3 + 0.5 * noise4 + 1.1 * armMod);
-      let modAngle = angle + sin(layerSeed + angle * 4.5) * 2.5 + cos(layerSeed + angle * 2.7) * 2.1;
-      let density = 1.0;
-      let px = n.x + cos(modAngle) * noiseRad * density;
-      let py = n.y + sin(modAngle) * noiseRad * density;
-      let distFromCore = dist(px, py, n.x, n.y);
-      let depth = 1 - constrain(distFromCore / (n.r * 2.2), 0, 1);
-      let colorType = layerRandoms[a][0];
-      let col = getNebulaColor(colorType);
-      let alpha = map(distFromCore, 0, n.r * 2.2, layerAlpha * 2.0, 20) * (0.7 + 0.6 * depth);
-      let sw = map(distFromCore, 0, n.r * 2.2, 2.7, 0.5) + 1.2 * depth;
-      drawEllipse(galaxyBuffer, px, py, sw, sw, color(red(col), green(col), blue(col), alpha));
+    // --- Add filaments ---
+  let filamentCount = int(random(4, 9)); // more filaments
+    for (let f = 0; f < filamentCount; f++) {
+      let fx = n.x + random(-layerRad * 0.6, layerRad * 0.6);
+      let fy = n.y + random(-layerRad * 0.6, layerRad * 0.6);
+  let filamentLen = layerRad * random(1.2, 2.2); // longer filaments
+      let filamentAngle = random(TWO_PI);
+      for (let i = 0; i < int(points / 4); i++) {
+        let t = i / (points / 4);
+        let px = fx + cos(filamentAngle) * filamentLen * t + random(-8, 8);
+        let py = fy + sin(filamentAngle) * filamentLen * t + random(-8, 8);
+        if (random() < 0.5) {
+          let colorType = random();
+          let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+          let distFromCore = dist(px, py, n.x, n.y);
+          let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+          let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 6.2, 12) * density * random(0.7, 1.7);
+          galaxyBuffer.stroke(red(col) + random(-60,60), green(col) + random(-60,60), blue(col) + random(-60,60), alpha);
+          galaxyBuffer.strokeWeight(random(1.2, 2.2));
+          galaxyBuffer.point(px, py);
+        }
+      }
     }
+    // --- Leave voids/gaps by skipping some regions ---
+    // (No code needed, just don't fill everywhere)
   }
-  const nebLen = int(n.r * 0.8 * n.shapeFactor);
-  for (let i = 0; i < nebLen; i++) {
+  // Add some scattered knots and filaments (more compact)
+  const knotCount = int(n.r * 0.25 * n.shapeFactor);
+  for (let i = 0; i < knotCount; i++) {
     let angle = random(TWO_PI);
-    let rad = random(0, n.r * 0.17 * n.shapeFactor);
-    let px = n.x + cos(angle) * rad;
-    let py = n.y + sin(angle) * rad;
+    let rad = random(n.r * 0.15, n.r * 0.7);
+    let px = n.x + cos(angle) * rad + random(-8, 8);
+    let py = n.y + sin(angle) * rad * random(0.85, 1.05) + random(-8, 8);
     let colorType = random();
-    let col = getNebulaColor(colorType);
-    drawEllipse(galaxyBuffer, px, py, 6, 6, color(red(col), green(col), blue(col), 120));
+    let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+    galaxyBuffer.stroke(red(col), green(col), blue(col), random(180, 255));
+    galaxyBuffer.strokeWeight(random(1.5, 3.2));
+    galaxyBuffer.point(px, py);
   }
   galaxyBuffer.pop();
 }
@@ -759,92 +904,71 @@ function mousePressed() {
   panVXAvg = 0;
   panVYAvg = 0;
   // --- Check for nebula/galaxy/blackhole/starcluster/pulsar/quasar click ---
-  let mx = offsetX + (mouseX - width / 2);
-  let my = offsetY + (mouseY - height / 2);
-  let found = false;
-  for (let n of nebulae) {
-    if (dist(mx, my, n.x, n.y) < n.r * 0.5) {
-      selectedObject = n;
-      selectedType = "nebula";
-      selectedName = n.name;
-      found = true;
-      break;
-    }
+  function isInBorder(obj, type) {
+    let borderScale = getBorderScale(type);
+    let side = obj.r * zoomLevel * borderScale;
+    let half = side / 2;
+    let objScreenX = (obj.x - offsetX) * zoomLevel + width / 2;
+    let objScreenY = (obj.y - offsetY) * zoomLevel + height / 2;
+    return (
+      mouseX >= objScreenX - half && mouseX <= objScreenX + half &&
+      mouseY >= objScreenY - half && mouseY <= objScreenY + half
+    );
   }
-  if (!found) {
-    for (let g of galaxies) {
-      if (dist(mx, my, g.x, g.y) < g.r * 0.5) {
-        selectedObject = g;
-        selectedType = "galaxy";
-        selectedName = g.name;
-        found = true;
-        break;
+  // Check all objects for hit, return early on first match
+  const objectTypes = [
+    { list: nebulae, type: "nebula" },
+    { list: galaxies, type: "galaxy" },
+    { list: blackholes, type: "blackhole" },
+    { list: starClusters, type: "starcluster" },
+    { list: pulsars, type: "pulsar" },
+    { list: quasars, type: "quasar" }
+  ];
+  for (const { list, type } of objectTypes) {
+    for (const obj of list) {
+      if (isInBorder(obj, type)) {
+        selectedObject = obj;
+        selectedType = type;
+        selectedName = obj.name;
+        labelAnimStart = millis();
+        labelAnimActive = true;
+        labelAnimReverse = false;
+        let objScreenX = (selectedObject.x - offsetX) + width / 2;
+        let objScreenY = (selectedObject.y - offsetY) + height / 2;
+        let angle = PI / 4;
+        let distOffset = selectedObject.r + 40;
+        let labelX = objScreenX + cos(angle) * distOffset;
+        let labelY = objScreenY - sin(angle) * distOffset;
+        labelLineStart = {x: objScreenX, y: objScreenY};
+        labelLineEnd = {x: labelX, y: labelY};
+        // Clear previous
+        prevSelectedObject = null;
+        prevSelectedType = "";
+        prevSelectedName = "";
+        prevLabelLineStart = null;
+        prevLabelLineEnd = null;
+        return;
       }
     }
   }
-  if (!found) {
-    for (let bh of blackholes) {
-      if (dist(mx, my, bh.x, bh.y) < bh.r * 0.5) {
-        selectedObject = bh;
-        selectedType = "blackhole";
-        selectedName = bh.name;
-        found = true;
-        break;
-      }
-    }
-  }
-  if (!found) {
-    for (let sc of starClusters) {
-      if (dist(mx, my, sc.x, sc.y) < sc.r * 0.7) {
-        selectedObject = sc;
-        selectedType = "starcluster";
-        selectedName = sc.name;
-        found = true;
-        break;
-      }
-    }
-  }
-  if (!found) {
-    for (let p of pulsars) {
-      if (dist(mx, my, p.x, p.y) < p.r * 0.7) {
-        selectedObject = p;
-        selectedType = "pulsar";
-        selectedName = p.name;
-        found = true;
-        break;
-      }
-    }
-  }
-  if (!found) {
-    for (let q of quasars) {
-      if (dist(mx, my, q.x, q.y) < q.r * 0.7) {
-        selectedObject = q;
-        selectedType = "quasar";
-        selectedName = q.name;
-        found = true;
-        break;
-      }
-    }
-  }
-  if (found) {
+  // No object found, start reverse animation
+  if (selectedObject) {
     labelAnimStart = millis();
     labelAnimActive = true;
-    let objScreenX = (selectedObject.x - offsetX) + width / 2;
-    let objScreenY = (selectedObject.y - offsetY) + height / 2;
-    let angle = PI / 4;
-    let distOffset = selectedObject.r + 40;
-    let labelX = objScreenX + cos(angle) * distOffset;
-    let labelY = objScreenY - sin(angle) * distOffset;
-    labelLineStart = {x: objScreenX, y: objScreenY};
-    labelLineEnd = {x: labelX, y: labelY};
+    labelAnimReverse = true;
+    prevSelectedObject = selectedObject;
+    prevSelectedType = selectedType;
+    prevSelectedName = selectedName;
+    prevLabelLineStart = labelLineStart;
+    prevLabelLineEnd = labelLineEnd;
   } else {
     labelAnimActive = false;
-    labelLineStart = null;
-    labelLineEnd = null;
-    selectedObject = null;
-    selectedType = "";
-    selectedName = "";
   }
+  labelLineStart = null;
+  labelLineEnd = null;
+  selectedObject = null;
+  selectedType = "";
+  selectedName = "";
 }
 function mouseDragged() {
   if (dragging) {
@@ -866,10 +990,10 @@ function mouseReleased() {
   panVY = panVYAvg;
 }
 function keyPressed() {
-  if (keyCode === LEFT_ARROW) panLeft = true;
-  if (keyCode === RIGHT_ARROW) panRight = true;
-  if (keyCode === UP_ARROW) panUp = true;
-  if (keyCode === DOWN_ARROW) panDown = true;
+  if (keyCode === LEFT_ARROW || key === 'a' || key === 'As') panLeft = true;
+  if (keyCode === RIGHT_ARROW || key === 'd' || key === 'D') panRight = true;
+  if (keyCode === UP_ARROW || key === 'w' || key === 'W') panUp = true;
+  if (keyCode === DOWN_ARROW || key === 's' || key === 'S') panDown = true;
   if (key === '1') {
     let bx = offsetX + (mouseX - width / 2);
     let by = offsetY + (mouseY - height / 2);
@@ -903,6 +1027,15 @@ function keyPressed() {
   if (key === 'h' || key === 'H') {
     offsetX = galaxyW / 2;
     offsetY = galaxyH / 2;
+  }
+  // --- Map Zoom Controls ---
+  // Gradual zoom in with + or =
+  if (key === '+' || key === '=') {
+    zoomLevel = constrain(zoomLevel + 0.08, 0.2, 5.0);
+  }
+  // Gradual zoom out with - or _
+  if (key === '-' || key === '_') {
+    zoomLevel = constrain(zoomLevel - 0.08, 0.2, 5.0);
   }
   // Delete most recent item with backspace
   if (keyCode === BACKSPACE) {
@@ -949,6 +1082,93 @@ function keyPressed() {
     starExploding = false;
     starExplosionProgress = 0;
     redrawBuffer();
+  }
+  // --- Property cycling for selected item ---
+  if (selectedObject) {
+    // 7: Cycle size (expanded ranges)
+    if (key === '7') {
+      if (selectedType === 'nebula') {
+        let minR = 420, maxR = 630;
+        selectedObject.r += 42;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+        selectedObject.layerRads = Array.from({length: selectedObject.layers}, (_, i) => selectedObject.r * map(i, 0, selectedObject.layers - 1, 1, random(1.2, 4.2)));
+      } else if (selectedType === 'galaxy') {
+        let minR = 238, maxR = 476;
+        selectedObject.r += 24;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      } else if (selectedType === 'starcluster') {
+        let minR = 42, maxR = 63;
+        selectedObject.r += 7;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      } else if (selectedType === 'quasar') {
+        let minR = 21, maxR = 42;
+        selectedObject.r += 4;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      } else if (selectedType === 'blackhole') {
+        let minR = 10.5, maxR = 14;
+        selectedObject.r += 1;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      } else if (selectedType === 'pulsar') {
+        let minR = 10.5, maxR = 14;
+        selectedObject.r += 1;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      }
+      redrawBuffer();
+    }
+    // 8: Cycle density (expanded ranges)
+    if (key === '8') {
+      if (selectedType === 'nebula') {
+        let minLayers = 4, maxLayers = 14;
+        selectedObject.layers++;
+        if (selectedObject.layers > maxLayers) selectedObject.layers = minLayers;
+        selectedObject.layerSeeds = Array.from({length: selectedObject.layers}, () => random(10000));
+        selectedObject.layerRads = Array.from({length: selectedObject.layers}, (_, i) => selectedObject.r * map(i, 0, selectedObject.layers - 1, 1, random(1.2, 4.2)));
+        selectedObject.layerAlphas = Array.from({length: selectedObject.layers}, (_, i) => map(i, 0, selectedObject.layers - 1, random(30, 140), random(8, 80)));
+        selectedObject.armCounts = Array.from({length: selectedObject.layers}, () => int(random(2, 22)));
+        selectedObject.armSpreads = Array.from({length: selectedObject.layers}, () => random(0.2, 6.2));
+      } else if (selectedType === 'galaxy') {
+        let minArms = 3, maxArms = 10;
+        selectedObject.arms++;
+        if (selectedObject.arms > maxArms) selectedObject.arms = minArms;
+        selectedObject.armSeeds = Array.from({length: selectedObject.arms}, () => random(10000));
+        selectedObject.armAngles = Array.from({length: selectedObject.arms}, (v, arm) => (TWO_PI / selectedObject.arms) * arm + random(-0.3, 0.3));
+      } else if (selectedType === 'starcluster') {
+        let minCount = 140, maxCount = 280;
+        selectedObject.count += 28;
+        if (selectedObject.count > maxCount) selectedObject.count = minCount;
+      } else if (selectedType === 'quasar') {
+        let minR = 60, maxR = 120;
+        selectedObject.r += 12;
+        if (selectedObject.r > maxR) selectedObject.r = minR;
+      }
+      redrawBuffer();
+    }
+    // 9: Cycle hue
+    if (key === '9') {
+      if (selectedType === 'nebula') {
+        selectedObject.baseHue = (selectedObject.baseHue + 30) % 360;
+      } else if (selectedType === 'galaxy') {
+        selectedObject.baseHue = (selectedObject.baseHue + 30) % 360;
+      } else if (selectedType === 'quasar') {
+        selectedObject.baseHue = (selectedObject.baseHue + 30) % 360;
+      }
+      // For blackhole, pulsar, starcluster: cycle color by shifting a property if present
+      else if (selectedType === 'blackhole') {
+        // No baseHue, but could add a color shift property if desired
+        selectedObject.colorShift = (selectedObject.colorShift || 0) + 30;
+      } else if (selectedType === 'pulsar') {
+        selectedObject.colorShift = (selectedObject.colorShift || 0) + 30;
+      } else if (selectedType === 'starcluster') {
+        selectedObject.colorShift = (selectedObject.colorShift || 0) + 30;
+      }
+      redrawBuffer();
+    }
+  }
+}
+function keyReleased() {
+  if ([LEFT_ARROW, RIGHT_ARROW, UP_ARROW, DOWN_ARROW].includes(keyCode) ||
+      ['a','A','d','D','w','W','s','S'].includes(key)) {
+    panLeft = panRight = panUp = panDown = false;
   }
 }
 // =========================
@@ -1041,43 +1261,14 @@ function touchStarted() {
       }
     }
   }
-  if (found) {
-    labelAnimStart = millis();
-    labelAnimActive = true;
-    let angle
-    labelLineEnd = {x: labelX, y: labelY};
-  } else {
-    labelAnimActive = false;
-    labelLineStart = null;
-    labelLineEnd = null;
-  }
-  if (!found) {
-    selectedObject = null;
-    selectedType = "";
-    selectedName = "";
-  }
-}
-function touchMoved() {
-  if (dragging) {
-    let dx = (touches[0].x - lastTouchX) / zoomLevel;
-    let dy = (touches[0].y - lastTouchY) / zoomLevel;
-    offsetX -= dx;
-    offsetY -= dy;
-    lastDragTime = millis();
-    panVXAvg = panVXAvg * 0.7 - dx * 0.3;
-    panVYAvg = panVYAvg * 0.7 - dy * 0.3;
-    lastTouchX = touches[0].x;
-    lastTouchY = touches[0].y;
-    offsetX = constrain(offsetX, 0, galaxyW);
-    offsetY = constrain(offsetY, 0, galaxyH);
-  }
-  return false;
+  galaxyBuffer = createGraphics(galaxyW, galaxyH);
+  offsetX = galaxyW / 2;
+  offsetY = galaxyH / 2;
+  redrawBuffer();
 }
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  galaxyW = windowWidth * 6;
-  galaxyH = windowHeight * 6;
-  galaxyBuffer = createGraphics(galaxyW, galaxyH);
+  // Recenter viewport
   offsetX = galaxyW / 2;
   offsetY = galaxyH / 2;
   redrawBuffer();
