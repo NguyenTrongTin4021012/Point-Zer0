@@ -627,18 +627,20 @@ function drawInstructions() {
   }
   // Draw and record clickable regions for navigation keys
   let navKeys = [
-    {key: 'h', label: 'Recenter'},
-    {key: '+', label: 'Zoom In'},
-    {key: '-', label: 'Zoom Out'}
+    {key: 'pan', label: 'Pan: Mouse/WASD/Arrows', isRegion: true},
+    {key: 'select', label: 'Select: Click', isRegion: true},
+    {key: 'h', label: 'H: Recenter'},
+    {key: '+', label: '+: Zoom In'},
+    {key: '-', label: '-: Zoom Out'}
   ];
   x = width / 2 - textWidth(navigationText) / 2;
   y = bottomBoxY + boxHeight / 2 - actualFontSize / 2;
   for (let i = 0; i < navKeys.length; i++) {
     let keyLabel = navKeys[i].key;
     let label = navKeys[i].label;
-    let keyText = label + ': ' + keyLabel;
-    let tw = textWidth(label + ': ' + keyLabel + '   ');
-    let region = {x, y, w: tw, h: actualFontSize + 8, key: keyLabel};
+    let keyText = label;
+    let tw = textWidth(keyText + '   ');
+    let region = {x, y, w: tw, h: actualFontSize + 8, key: keyLabel, isRegion: !!navKeys[i].isRegion};
     window._instructionBarRegions.push(region);
     let isHovered = mouseX >= x && mouseX <= x + tw && mouseY >= y && mouseY <= y + actualFontSize + 8 && mouseInViewport;
     let isTouchActive = window._lastTouch && window._lastTouch.x >= x && window._lastTouch.x <= x + tw && window._lastTouch.y >= y && window._lastTouch.y <= y + actualFontSize + 8;
