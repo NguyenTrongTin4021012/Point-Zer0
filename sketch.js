@@ -8,7 +8,7 @@
 // --- State & Data ---
 let mouseInViewport = true;
 let canvas, viewportW, viewportH;
-let zoom = 1, targetZoom = 1, minZoom = 0.2, maxZoom = 2.5;
+let zoom = 1, targetZoom = 1, minZoom = 0.2, maxZoom = 2.0;
 let panX = 0, panY = 0, targetPanX = 0, targetPanY = 0;
 let dragging = false, dragStartX = 0, dragStartY = 0, dragOriginX = 0, dragOriginY = 0;
 let stars = [], planets = [], nebulae = [], blackHoles = [], galaxies = [];
@@ -123,7 +123,7 @@ function preload() {
   }
 }
 function setup() {
-  pixelDensity(1); // Optimize for performance (no retina)
+  // pixelDensity(1); // Allow high-DPI rendering for sharper visuals
   frameRate(60); // Cap frame rate for consistency
   createCanvas(windowWidth, windowHeight);
   colorMode(RGB, 255, 255, 255, 255);
@@ -136,7 +136,7 @@ function setup() {
   galaxyH = windowHeight * 6;
   galaxyBuffer = createGraphics(galaxyW, galaxyH);
   galaxyBuffer.colorMode(RGB, 255, 255, 255, 255);
-  galaxyBuffer.noSmooth(); // Sharper points, better perf
+  // galaxyBuffer.noSmooth(); // Allow smoothing for less pixelation
   for (let i = 0; i < 1200; i++) {
     starsX[i] = random(galaxyW);
     starsY[i] = random(galaxyH);
@@ -298,7 +298,7 @@ function drawZoomBar() {
   let barHeight = Math.max(120, Math.min(0.32 * height, 220));
   let barX = width - 24;
   let barY = (height - barHeight) / 2;
-  let minZoom = 0.2, maxZoom = 5.0;
+  let minZoom = 0.2, maxZoom = 2.0;
   stroke(255, 180);
   strokeWeight(2);
   // Draw main vertical line
@@ -1336,7 +1336,9 @@ function mousePressed() {
             } else if (region.action === "color") {
               key = 't'; keyCode = 84; keyPressed();
             } else if (region.action === "deleteSelected") {
-              key = '`'; keyCode = 192; keyPressed();
+              key = '';
+              keyCode = 9; // Tab key
+              keyPressed();
             }
           }
         } else if (region.action === 'save') {
@@ -1584,14 +1586,14 @@ function keyPressed() {
   // --- Map Zoom Controls ---
   // Gradual zoom in with + or =
   if (key === '+' || key === '=') {
-    zoomLevel = constrain(zoomLevel + 0.08, 0.2, 5.0);
+  zoomLevel = constrain(zoomLevel + 0.08, 0.2, 2.0);
   }
   // Gradual zoom out with - or _
   if (key === '-' || key === '_') {
-    zoomLevel = constrain(zoomLevel - 0.08, 0.2, 5.0);
+  zoomLevel = constrain(zoomLevel - 0.08, 0.2, 2.0);
   }
-  // Delete selected item with backtick (`)
-  if (key === '`') {
+  // Delete selected item with Tab key
+  if (keyCode === 9) { // Tab key
     if (selectedObject && selectedType) {
       let list = null;
       if (selectedType === "nebula") list = nebulae;
@@ -1599,7 +1601,7 @@ function keyPressed() {
       else if (selectedType === "blackhole") list = blackholes;
       else if (selectedType === "starcluster") list = starClusters;
       else if (selectedType === "pulsar") list = pulsars;
-           else if (selectedType === "quasar") list = quasars;
+      else if (selectedType === "quasar") list = quasars;
       if (list) {
         let idx = list.indexOf(selectedObject);
         if (idx !== -1) {
@@ -1823,7 +1825,7 @@ function drawTaskBar() {
     { label: 'Size: E', key: 'e', action: 'size' },
     { label: 'Density: R', key: 'r', action: 'density' },
     { label: 'Color: T', key: 't', action: 'color' },
-    { label: 'Delete Selected: `', key: '`', action: 'deleteSelected' },
+    { label: 'Delete: Tab', key: 'tab', action: 'deleteSelected' },
     { label: 'Restart: Esc', key: 'escape', action: 'restart' },
     { label: 'Info: I', key: 'i', action: 'info' },
     { label: 'Save: Ctrl+S', key: 'ctrls', action: 'save' }
