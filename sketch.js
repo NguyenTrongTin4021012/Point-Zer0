@@ -621,7 +621,7 @@ function handlePanning() {
 // =========================
 function getBorderScale(type) {
   switch (type) {
-    case "nebula": return 0.5;
+    case "nebula": return 1.2;
     case "galaxy": return 1;
     case "starcluster": return 1;
     case "quasar": return 4;
@@ -2458,3 +2458,4 @@ function drawGrid() {
   }
   image(gridBuffer, 0, 0);
 }
+
