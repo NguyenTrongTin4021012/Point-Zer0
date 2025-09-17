@@ -1932,10 +1932,14 @@ function keyPressed() {
         selectedObject.r += 42;
         if (selectedObject.r > maxR) selectedObject.r = minR;
         selectedObject.layerRads = Array.from({length: selectedObject.layers}, (_, i) => selectedObject.r * map(i, 0, selectedObject.layers - 1, 1, random(1.2, 4.2)));
+        // Regenerate nebula geometry
+        regenerateNebulaGeometry(selectedObject);
       } else if (selectedType === 'galaxy') {
         let minR = 238, maxR = 476;
         selectedObject.r += 24;
         if (selectedObject.r > maxR) selectedObject.r = minR;
+        // Regenerate galaxy geometry
+        regenerateGalaxyGeometry(selectedObject);
       } else if (selectedType === 'starcluster') {
         let minR = 42, maxR = 63;
         selectedObject.r += 7;
@@ -1971,6 +1975,8 @@ function keyPressed() {
         selectedObject.layerAlphas = Array.from({length: selectedObject.layers}, (_, i) => map(i, 0, selectedObject.layers - 1, random(20, 180), random(8, 120)));
         selectedObject.armCounts = Array.from({length: selectedObject.layers}, () => int(random(2, 32)));
         selectedObject.armSpreads = Array.from({length: selectedObject.layers}, () => random(0.1, 10.2));
+        // Regenerate nebula geometry
+        regenerateNebulaGeometry(selectedObject);
       } else if (selectedType === 'galaxy') {
         // Dramatically increase/decrease arms
         let minArms = 2, maxArms = 18;
@@ -1981,6 +1987,8 @@ function keyPressed() {
         if (selectedObject.arms < minArms) { selectedObject.arms = minArms; selectedObject._densityDir = 1; }
         selectedObject.armSeeds = Array.from({length: selectedObject.arms}, () => random(10000));
         selectedObject.armAngles = Array.from({length: selectedObject.arms}, (v, arm) => (TWO_PI / selectedObject.arms) * arm + random(-0.5, 0.5));
+        // Regenerate galaxy geometry
+        regenerateGalaxyGeometry(selectedObject);
       } else if (selectedType === 'starcluster') {
         // Dramatically increase/decrease count
         let minCount = 40, maxCount = 600;
@@ -2004,9 +2012,154 @@ function keyPressed() {
     if (key === 't' || key === 'T') {
       if (selectedObject && typeof selectedObject.baseHue === 'number') {
         selectedObject.baseHue = (selectedObject.baseHue + 30) % 360;
+        // Regenerate geometry for color change
+        if (selectedType === 'nebula') {
+          regenerateNebulaGeometry(selectedObject);
+        } else if (selectedType === 'galaxy') {
+          regenerateGalaxyGeometry(selectedObject);
+        }
         redrawBuffer();
       }
     }
+// Regenerate precomputed geometry/color for a nebula object
+function regenerateNebulaGeometry(n) {
+  // Copy of addNebula's precompute logic, but for an existing object
+  let layersData = [];
+  for (let layer = 0; layer < n.layers; layer++) {
+    const layerSeed = n.layerSeeds[layer];
+    const points = 180 + int(random(-40, 60));
+    const layerRad = n.layerRads[layer] * 0.65;
+    const layerAlpha = n.layerAlphas[layer];
+    const armSpread = n.armSpreads[layer] * 0.6;
+    let cloudGroups = int(random(2, 5));
+    let cloudData = [];
+    for (let g = 0; g < cloudGroups; g++) {
+      let cx = n.x + random(-layerRad * 0.9, layerRad * 0.9);
+      let cy = n.y + random(-layerRad * 0.9, layerRad * 0.9);
+      let groupRad = layerRad * random(0.28, 0.65);
+      let groupPoints = int(points / cloudGroups * random(1.2, 2.2));
+      let groupCloud = [];
+      for (let i = 0; i < Math.floor(groupPoints / 4); i++) {
+        let px = cx + random(-groupRad, groupRad) + random(-18, 18);
+        let py = cy + random(-groupRad, groupRad) + random(-18, 18);
+        let colorType = random();
+        let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+        let distFromCore = dist(px, py, n.x, n.y);
+        let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+        let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 7.2, 38) * density * random(1.1, 1.7);
+        let strokeCol = color(red(col) + random(-40,40), green(col) + random(-40,40), blue(col) + random(-40,40), alpha);
+        let sw = random(1.2, 2.2) * 1.25 * 1.25;
+        groupCloud.push({px, py, strokeCol, sw});
+      }
+      cloudData.push(groupCloud);
+    }
+    // Filaments
+    let filamentCount = int(random(4, 9));
+    let filamentData = [];
+    for (let f = 0; f < filamentCount; f++) {
+      let fx = n.x + random(-layerRad * 0.6, layerRad * 0.6);
+      let fy = n.y + random(-layerRad * 0.6, layerRad * 0.6);
+      let filamentLen = layerRad * random(1.2, 2.2);
+      let filamentAngle = random(TWO_PI);
+      let filamentPoints = [];
+      for (let i = 0; i < Math.floor(points / 16); i++) {
+        let t = i / (points / 4);
+        let px = fx + cos(filamentAngle) * filamentLen * t + random(-8, 8);
+        let py = fy + sin(filamentAngle) * filamentLen * t + random(-8, 8);
+        let colorType = random();
+        let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+        let distFromCore = dist(px, py, n.x, n.y);
+        let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+        let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 8.2, 28) * density * random(1.1, 2.0);
+        let strokeCol = color(red(col) + random(-60,60), green(col) + random(-60,60), blue(col) + random(-60,60), alpha);
+        let sw = random(1.2, 2.2) * 1.25 * 1.25;
+        filamentPoints.push({px, py, strokeCol, sw});
+      }
+      filamentData.push(filamentPoints);
+    }
+    layersData.push({cloudData, filamentData});
+  }
+  // Knots
+  const knotCount = int(n.r * 0.25 * n.shapeFactor);
+  let knotData = [];
+  for (let i = 0; i < Math.floor(knotCount / 4); i++) {
+    let angle = random(TWO_PI);
+    let rad = random(n.r * 0.15, n.r * 0.7);
+    let px = n.x + cos(angle) * rad + random(-8, 8);
+    let py = n.y + sin(angle) * rad * random(0.85, 1.05) + random(-8, 8);
+    let colorType = random();
+    let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
+    let strokeCol = color(red(col), green(col), blue(col), random(230, 255));
+    let sw = random(1.5, 3.2) * 1.25 * 1.25;
+    knotData.push({px, py, strokeCol, sw});
+  }
+  n.layersData = layersData;
+  n.knotData = knotData;
+}
+
+// Regenerate precomputed geometry/color for a galaxy object
+function regenerateGalaxyGeometry(g) {
+  // Copy of addGalaxy's precompute logic, but for an existing object
+  let corePoints = Math.floor(g.points * 0.18);
+  let coreData = [];
+  for (let i = 0; i < corePoints; i++) {
+    let t = i / corePoints;
+    let angle = random(TWO_PI);
+    let rad = random(0, g.r * 0.13 * (0.7 + 0.5 * t));
+    let px = g.x + cos(angle) * rad;
+    let py = g.y + sin(angle) * rad;
+    let col = getGalaxyColor(t, g.baseHue);
+    col.setAlpha(255 - t * 60);
+    coreData.push({px, py, col});
+  }
+  // Arms
+  let spiralA = 0.16 + random(-0.03, 0.03);
+  let spiralB = 0.44 + random(-0.08, 0.08);
+  let armsData = [];
+  for (let arm = 0; arm < g.arms; arm++) {
+    const armSeed = g.armSeeds[arm];
+    const armAngle = g.armAngles[arm];
+    const clumpSeed = g.clumpSeeds[arm];
+    let armLen = Math.floor(g.points * 0.82 / g.arms);
+    let armPoints = [];
+    for (let i = 0; i < armLen; i++) {
+      let t = i / armLen;
+      let theta = t * 4.5 * PI + random(-0.04, 0.04);
+      let spiralR = spiralA * exp(spiralB * theta);
+      let baseRad = g.r * spiralR * (0.7 + 0.3 * t);
+      let angle = armAngle + theta + sin(armSeed + t * 12.0) * 0.13;
+      let clump = 1.0 + 0.7 * noise(clumpSeed + t * 2.5) + (random() < 0.08 ? random(0.7, 2.2) : 0);
+      let rad = baseRad * clump;
+      let bulge = exp(-pow(t * 2.1, 2)) * g.r * g.bulgeFactors[i % g.bulgeFactors.length];
+      let dust = sin(angle * 2.5 + t * 8) * g.dustFactors[i % g.dustFactors.length] * g.r * (1 - t);
+      let px = g.x + cos(angle) * (rad + bulge + dust);
+      let py = g.y + sin(angle) * (rad + bulge + dust);
+      let col = getGalaxyColor(t, g.baseHue);
+      let alpha = lerp(255, 80, t) * (0.8 + 0.7 * noise(clumpSeed + t * 3.5));
+      col.setAlpha(alpha);
+      let drawIt = (random() < lerp(1, 0.45, t));
+      let dustLane = (random() < 0.04 && t > 0.3 && t < 0.9);
+      armPoints.push({px, py, col, drawIt, dustLane, angle, t});
+    }
+    armsData.push(armPoints);
+  }
+  // Halo
+  let haloPoints = Math.floor(g.points * 0.12);
+  let haloData = [];
+  for (let i = 0; i < haloPoints; i++) {
+    let t = i / haloPoints;
+    let angle = random(TWO_PI);
+    let rad = g.r * (0.9 + random(0.1, 0.7));
+    let px = g.x + cos(angle) * rad + random(-8, 8);
+    let py = g.y + sin(angle) * rad + random(-8, 8);
+    let col = getGalaxyColor(t, g.baseHue);
+    col.setAlpha(random(40, 90));
+    haloData.push({px, py, col});
+  }
+  g.coreData = coreData;
+  g.armsData = armsData;
+  g.haloData = haloData;
+}
   }
 }
 /**
