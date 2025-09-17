@@ -625,7 +625,7 @@ function getBorderScale(type) {
     case "galaxy": return 1;
     case "starcluster": return 1;
     case "quasar": return 4;
-    case "blackhole":
+    case "blackhole": 2;
     case "pulsar": return 6;
     default: return 1;
   }
@@ -2458,4 +2458,5 @@ function drawGrid() {
   }
   image(gridBuffer, 0, 0);
 }
+
 
