@@ -183,10 +183,10 @@ function getObjectAtScreen(x, y) {
   for (const { list, type } of objectTypes) {
     for (const obj of list) {
       let borderScale = getBorderScale(type);
-      let side = obj.r * zoomLevel * borderScale;
+      let side = obj.r * borderScale * zoomLevel;
       let half = side / 2;
-      let objScreenX = (obj.x - offsetX) + width / 2;
-      let objScreenY = (obj.y - offsetY) + height / 2;
+      let objScreenX = (obj.x - offsetX) * zoomLevel + width / 2;
+      let objScreenY = (obj.y - offsetY) * zoomLevel + height / 2;
       if (
         x >= objScreenX - half && x <= objScreenX + half &&
         y >= objScreenY - half && y <= objScreenY + half
@@ -382,10 +382,10 @@ function drawHoverLabel() {
   let name = hoverName;
   let r = obj.r || 40;
   let borderScale = getBorderScale(type);
-  let side = r * zoomLevel * borderScale;
+  let side = r * borderScale * zoomLevel;
   let half = side / 2;
-  let objScreenX = (obj.x - offsetX) + width / 2;
-  let objScreenY = (obj.y - offsetY) + height / 2;
+  let objScreenX = (obj.x - offsetX) * zoomLevel + width / 2;
+  let objScreenY = (obj.y - offsetY) * zoomLevel + height / 2;
   // Clamp border to viewport
   objScreenX = constrain(objScreenX, half + 2, width - half - 2);
   objScreenY = constrain(objScreenY, half + 2, height - half - 2);
@@ -643,13 +643,16 @@ function drawLabel() {
   if (obj && lineEnd && lineStart) {
     let animProgress = min(1, (millis() - labelAnimStart) / labelAnimDuration);
     if (labelAnimReverse) animProgress = 1 - animProgress;
-    let r = obj.r || 40;
-    let borderScale = getBorderScale(type);
-    let side = r * zoomLevel * borderScale;
-    let half = side / 2;
-    let len = side * 0.22;
-    let objScreenX = (obj.x - offsetX) + width / 2;
-    let objScreenY = (obj.y - offsetY) + height / 2;
+  let r = obj.r || 40;
+  let borderScale = getBorderScale(type);
+  let side = r * borderScale * zoomLevel;
+  let half = side / 2;
+  let len = side * 0.22;
+  let objScreenX = (obj.x - offsetX) * zoomLevel + width / 2;
+  let objScreenY = (obj.y - offsetY) * zoomLevel + height / 2;
+  // Clamp border to viewport
+  objScreenX = constrain(objScreenX, half + 2, width - half - 2);
+  objScreenY = constrain(objScreenY, half + 2, height - half - 2);
     // Clamp border to viewport
     objScreenX = constrain(objScreenX, half + 2, width - half - 2);
     objScreenY = constrain(objScreenY, half + 2, height - half - 2);
