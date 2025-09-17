@@ -1,18 +1,26 @@
-
 // =========================
 // Interactive Galaxy Map - p5.js
 // Optimized & Cleaned
 // =========================
+//
+// This file implements an interactive, zoomable, and pannable galaxy map using p5.js.
+// Features:
+//   - Procedural generation of nebulae, galaxies, black holes, star clusters, pulsars, and quasars
+//   - Offscreen buffer for static background rendering
+//   - Dynamic overlays: grid, shooting star, UI bars, info overlays
+//   - Keyboard and mouse/touch event handling for all user interactions
+//   - Modularized rendering and UI logic
 
 // ===== 1. GLOBALS & CONSTANTS =====
 // --- State & Data ---
+// Global variables for viewport, zoom, panning, and object lists
 let mouseInViewport = true;
 let canvas, viewportW, viewportH;
 let zoom = 1, targetZoom = 1, minZoom = 0.2, maxZoom = 2.0;
 let panX = 0, panY = 0, targetPanX = 0, targetPanY = 0;
 let dragging = false, dragStartX = 0, dragStartY = 0, dragOriginX = 0, dragOriginY = 0;
-let stars = [], planets = [], nebulae = [], blackHoles = [], galaxies = [];
-let selectedObject = null, hoveredObject = null;
+let nebulae = [], galaxies = [];
+let selectedObject = null;
 let showInstructions = true;
 let showInfoOverlay = false;
 let infoOverlayAnim = 0; // 0 = closed, 1 = open
@@ -25,7 +33,7 @@ const NEBULA_COLORS = [[180,80,255,80],[80,180,255,80],[255,80,180,80]];
 const BLACKHOLE_COLOR = [30,30,40];
 const GALAXY_COLOR = [200,200,255,60];
 let lastFrameTime = 0;
-let hoverObject = null, hoverType = "", hoverName = "", hoverLabelLineStart = null, hoverLabelLineEnd = null;
+let hoverObject = null, hoverType = "", hoverName = "";
 let showLanding = true;
 let starExploding = false;
 let starExplosionProgress = 0;
@@ -48,6 +56,74 @@ let labelLineEnd = null;
 const MAX_PAN_VEL = 1000;
 let zoomLevel = 1.0;
 let kodeMonoFont;
+// Shooting star state
+let shootingStar = null;
+let nextShootingStarTime = 0;
+/**
+ * Resets the timer for the next shooting star event.
+ */
+function resetShootingStarTimer() {
+  nextShootingStarTime = millis() + random(3000, 10000);
+}
+
+/**
+ * Spawns a new shooting star with random position, direction, and speed.
+ */
+function spawnShootingStar() {
+  // Spawn in galaxy (canvas) coordinates, not viewport
+  let x = random(0, galaxyW);
+  let y = random(0, galaxyH);
+  let angle = random(0, TWO_PI);
+  let speed = random(8, 16);
+  let dx = cos(angle) * speed;
+  let dy = sin(angle) * speed;
+  let len = random(48, 90); // smaller length
+  shootingStar = {
+    x, y, dx, dy, len,
+    life: 0,
+    maxLife: random(32, 48),
+    alpha: 255
+  };
+}
+
+/**
+ * Draws the current shooting star on the canvas.
+ */
+function drawShootingStar() {
+  if (!shootingStar) return;
+  // Convert galaxy (canvas) coordinates to screen coordinates
+  let sx = (shootingStar.x - offsetX) * zoomLevel + width / 2;
+  let sy = (shootingStar.y - offsetY) * zoomLevel + height / 2;
+  let dx = shootingStar.dx * zoomLevel;
+  let dy = shootingStar.dy * zoomLevel;
+  push();
+  stroke(255, 255, 220, min(255, shootingStar.alpha + 80));
+  strokeWeight(2.2 * zoomLevel);
+  line(
+    sx,
+    sy,
+    sx - dx * shootingStar.len / 6,
+    sy - dy * shootingStar.len / 6
+  );
+  stroke(255, 255, 200, shootingStar.alpha);
+  strokeWeight(1.1 * zoomLevel);
+  line(
+    sx,
+    sy,
+    sx - dx * shootingStar.len / 8,
+    sy - dy * shootingStar.len / 8
+  );
+  pop();
+}
+// Typing effect state for landing screen
+let landingTitleTyped = 0;
+let landingSubtitleTyped = 0;
+let landingTypingStart = 0;
+const landingTitle = "Point Zer0";
+const landingSubtitle = "Begin with the Big Bang";
+const landingTitleDelay = 0; // ms
+const landingSubtitleDelay = 500; // ms after title
+const landingTypeSpeed = 20; // ms per char
 let starClusters = [];
 let pulsars = [];
 let quasars = [];
@@ -67,13 +143,18 @@ let prevSelectedType = "";
 let prevSelectedName = "";
 let prevLabelLineStart = null;
 let prevLabelLineEnd = null;
-// Touch globals must be declared before use
+let showGrid = false;
+let gridBuffer = null;
+let gridBufferParams = {zoom: null, offsetX: null, offsetY: null, width: null, height: null};
 
 // ===== 2. EVENT HANDLERS =====
 function mouseOut() { mouseInViewport = false; }
 function mouseOver() { mouseInViewport = true; }
 
 // Helper: Set main font
+/**
+ * Sets the main font for UI and labels, using KodeMono if loaded.
+ */
 function setMainFont() {
   // Only call textFont if it exists (p5.js loaded)
   if (typeof textFont === 'function') {
@@ -86,6 +167,10 @@ function setMainFont() {
 }
 
 // Efficient object hit-testing (returns {obj, type, name} or null)
+/**
+ * Returns the object at the given screen coordinates, or null if none.
+ * Used for hover and selection logic.
+ */
 function getObjectAtScreen(x, y) {
   const objectTypes = [
     { list: nebulae, type: "nebula" },
@@ -114,6 +199,9 @@ function getObjectAtScreen(x, y) {
 }
 
 // ===== 2. SETUP & INITIALIZATION =====
+/**
+ * p5.js preload: loads custom font if available.
+ */
 function preload() {
 // ===== 2. SETUP & INITIALIZATION =====
   try {
@@ -122,8 +210,12 @@ function preload() {
     kodeMonoFont = null;
   }
 }
+/**
+ * p5.js setup: initializes canvas, objects, and offscreen buffer.
+ */
 function setup() {
-  // pixelDensity(1); // Allow high-DPI rendering for sharper visuals
+  resetShootingStarTimer();
+  // (High-DPI rendering is allowed by default)
   frameRate(60); // Cap frame rate for consistency
   createCanvas(windowWidth, windowHeight);
   colorMode(RGB, 255, 255, 255, 255);
@@ -137,6 +229,7 @@ function setup() {
   galaxyBuffer = createGraphics(galaxyW, galaxyH);
   galaxyBuffer.colorMode(RGB, 255, 255, 255, 255);
   // galaxyBuffer.noSmooth(); // Allow smoothing for less pixelation
+// (Smoothing is allowed by default)
   for (let i = 0; i < 1200; i++) {
     starsX[i] = random(galaxyW);
     starsY[i] = random(galaxyH);
@@ -165,6 +258,9 @@ function setup() {
 }
 
 // ===== 3. MAIN RENDERING LOOP =====
+/**
+ * p5.js draw: main rendering loop for the interactive galaxy map.
+ */
 function draw() {
 // ===== 3. MAIN RENDERING LOOP =====
   // Cache values for performance
@@ -175,6 +271,20 @@ function draw() {
   if (showLanding) {
     drawLandingScreen();
     return;
+  }
+  // Shooting star logic (draw over everything)
+  if (shootingStar) {
+    drawShootingStar();
+    shootingStar.x += shootingStar.dx;
+    shootingStar.y += shootingStar.dy;
+    shootingStar.life++;
+    shootingStar.alpha *= 0.93;
+    if (shootingStar.life > shootingStar.maxLife || shootingStar.x > width + 60 || shootingStar.y > height + 60) {
+      shootingStar = null;
+      resetShootingStarTimer();
+    }
+  } else if (millis() > nextShootingStarTime) {
+    spawnShootingStar();
   }
   // Only one push/pop for all transforms
   push();
@@ -191,6 +301,8 @@ function draw() {
   if (ox < w2 && oy > gh - h2) image(galaxyBuffer, -ox + gw, -oy - gh, gw, gh);
   if (ox > gw - w2 && oy > gh - h2) image(galaxyBuffer, -ox - gw, -oy - gh, gw, gh);
   pop();
+  // Draw grid if toggled (before UI)
+  if (showGrid) drawGrid();
   // Cache font size for all UI (compute only if width changes)
   if (window._lastWidth !== width) {
     instructionFontSize = Math.max(16, Math.min(0.018 * width, 12 ));
@@ -227,8 +339,38 @@ function draw() {
   drawZoomBar();
   drawMouseCoords();
   drawInfoOverlay();
+  // Draw shooting star on top of all UI
+  if (shootingStar) {
+    drawShootingStar();
+  }
 }
 
+function drawShootingStar() {
+  if (!shootingStar) return;
+  // Convert galaxy (canvas) coordinates to screen coordinates
+  let sx = (shootingStar.x - offsetX) * zoomLevel + width / 2;
+  let sy = (shootingStar.y - offsetY) * zoomLevel + height / 2;
+  let dx = shootingStar.dx * zoomLevel;
+  let dy = shootingStar.dy * zoomLevel;
+  push();
+  stroke(255, 255, 220, min(255, shootingStar.alpha + 80));
+  strokeWeight(2.2 * zoomLevel);
+  line(
+    sx,
+    sy,
+    sx - dx * shootingStar.len / 6,
+    sy - dy * shootingStar.len / 6
+  );
+  stroke(255, 255, 200, shootingStar.alpha);
+  strokeWeight(1.1 * zoomLevel);
+  line(
+    sx,
+    sy,
+    sx - dx * shootingStar.len / 8,
+    sy - dy * shootingStar.len / 8
+  );
+  pop();
+}
 // Draws a white border and label for hovered object (if not selected)
 function drawHoverLabel() {
   if (!hoverObject || hoverObject === selectedObject) {
@@ -288,14 +430,14 @@ function drawHoverLabel() {
   text(classLabel, labelX, labelY + instructionFontSize * 1.27);
 }
 // (mouseMoved removed; now handled in draw)
-  drawInstructions();
-  drawZoomBar();
-  drawMouseCoords();
-  drawInfoOverlay();
+// ...existing code...
+// ===== 2. SETUP & INITIALIZATION =====
+// ...existing code...
 // Draws a vertical zoom size bar on the right side of the viewport
 function drawZoomBar() {
   // Bar settings (ultra minimal: just lines)
-  let barHeight = Math.max(120, Math.min(0.32 * height, 220));
+  // Zoom bar height adapts to window size, but never too small
+  let barHeight = Math.max(80, Math.min(0.32 * height, Math.max(120, Math.min(220, height * 0.35))));
   let barX = width - 24;
   let barY = (height - barHeight) / 2;
   let minZoom = 0.2, maxZoom = 2.0;
@@ -354,7 +496,19 @@ function drawZoomBar() {
   }
 }
 function drawLandingScreen() {
-  // Cache font and text settings
+  // Typing effect logic
+  if (!landingTypingStart) landingTypingStart = millis();
+  let elapsed = millis() - landingTypingStart;
+  // Title typing
+  let titleChars = min(landingTitle.length, Math.floor((elapsed - landingTitleDelay) / landingTypeSpeed));
+  if (titleChars > landingTitleTyped) landingTitleTyped = titleChars;
+  // Subtitle typing
+  let subtitleChars = 0;
+  if (elapsed > landingSubtitleDelay) {
+    subtitleChars = min(landingSubtitle.length, Math.floor((elapsed - landingSubtitleDelay) / landingTypeSpeed));
+    if (subtitleChars > landingSubtitleTyped) landingSubtitleTyped = subtitleChars;
+  }
+  // Draw background and text
   let cachedFont = kodeMonoFont || 'monospace';
   textFont(cachedFont);
   fill(255, 255, 255, 230);
@@ -362,7 +516,8 @@ function drawLandingScreen() {
   fill(30, 30, 30);
   textSize(54);
   textAlign(CENTER, CENTER);
-  text("Point Zer0", width / 2, height * 0.32);
+  let titleToShow = landingTitle.substring(0, landingTitleTyped);
+  text(titleToShow, width / 2, height * 0.32);
   let cx = width / 2, cy = height / 2;
   let t = millis() * 0.002;
   let oscSize = 1 + sin(t * 2.1) * 0.08;
@@ -426,11 +581,21 @@ function drawLandingScreen() {
   fill(5, 5, 5);
   textSize(28);
   textAlign(CENTER, CENTER);
-  text("Create your universe", width / 2, height * 0.75);
+  let subtitleToShow = landingSubtitle.substring(0, landingSubtitleTyped);
+  text(subtitleToShow, width / 2, height * 0.75);
+  // Reset typing effect if landing screen is re-shown
+  if (!showLanding) {
+    landingTitleTyped = 0;
+    landingSubtitleTyped = 0;
+    landingTypingStart = 0;
+  }
 }
 // =========================
 // 4. Panning & Zooming
 // =========================
+/**
+ * Handles keyboard and momentum-based panning of the viewport.
+ */
 function handlePanning() {
   const panStep = 30;
   if (panLeft) offsetX -= panStep;
@@ -465,6 +630,9 @@ function getBorderScale(type) {
     default: return 1;
   }
 }
+/**
+ * Draws the label and animated border for the selected object.
+ */
 function drawLabel() {
   textFont(kodeMonoFont || 'monospace');
   let obj = labelAnimReverse && prevSelectedObject ? prevSelectedObject : selectedObject;
@@ -552,19 +720,23 @@ function deselectObject() {
 // =========================
 // 6. Instructions & Mouse Coordinates
 // =========================
+/**
+ * Draws the top and bottom instruction bars with clickable regions.
+ */
 function drawInstructions() {
   // --- Clickable instruction bar regions ---
   // Store clickable regions for mousePressed
   if (!window._instructionBarRegions) window._instructionBarRegions = [];
   window._instructionBarRegions.length = 0;
-// ===== 4. UI & OVERLAY DRAWING =====
-// ===== 5. OBJECT RENDERING & LABELING =====
+  // ===== 4. UI & OVERLAY DRAWING =====
+  // ===== 5. OBJECT RENDERING & LABELING =====
   setMainFont();
   // Responsive sizing
-  let boxHeight = Math.max(28, Math.min(0.045 * height, 44));
+  // Ensure instruction bar is always visible and readable
+  let boxHeight = Math.max(28, Math.min(0.045 * height, Math.max(36, Math.min(44, height * 0.07))));
   // instructionFontSize is now set globally in draw()
   // Creation guide (top, unified keybind style)
-  let creationText = "Nebula: 1   Galaxy: 2   Blackhole: 3   Star Cluster: 4   Pulsar: 5   Quasar: 6";
+  let creationText = "Create: Nebula (1)   Galaxy (2)   Black Hole (3)   Star Cluster (4)   Pulsar (5)   Quasar (6)";
   let topBoxY = 0;
   noStroke();
   fill(10, 10, 10, 100);
@@ -572,15 +744,22 @@ function drawInstructions() {
   fill(255);
   textSize(instructionFontSize);
   textAlign(CENTER, CENTER);
-  // Shrink font if text is too wide (cache textWidth)
+  // Shrink font if text is too wide (cache textWidth, only recalc if width changes)
   let maxTextWidth = width - 32;
-  let actualFontSize = instructionFontSize;
-  let cachedWidth = textWidth(creationText);
-  while (cachedWidth > maxTextWidth && actualFontSize > 10) {
-    actualFontSize -= 1;
+  if (!window._lastCreationTextWidth || window._lastCreationTextWidthW !== width) {
+    let actualFontSize = instructionFontSize;
     textSize(actualFontSize);
-    cachedWidth = textWidth(creationText);
+    let cachedWidth = textWidth(creationText);
+    while (cachedWidth > maxTextWidth && actualFontSize > 10) {
+      actualFontSize -= 1;
+      textSize(actualFontSize);
+      cachedWidth = textWidth(creationText);
+    }
+    window._lastCreationTextWidth = cachedWidth;
+    window._lastCreationTextFontSize = actualFontSize;
+    window._lastCreationTextWidthW = width;
   }
+  let actualFontSize = window._lastCreationTextFontSize || instructionFontSize;
   // Draw and record clickable regions for creation keys
   let creationKeys = [
     {key: '1', label: 'Nebula'},
@@ -611,7 +790,7 @@ function drawInstructions() {
   }
 
   // Navigation & actions guide (bottom, expanded)
-  let navigationText = "Pan: Mouse/WASD/Arrows   Select: Click   H: Recenter   +/-: Zoom   ";
+  let navigationText = "Pan: Mouse, WASD, or Arrows   Select: Click   Recenter: H   Zoom: + / -";
   let bottomBoxY = height - boxHeight;
   noStroke();
   fill(10, 10, 10, 100);
@@ -633,17 +812,32 @@ function drawInstructions() {
     {key: '+', label: '+: Zoom In'},
     {key: '-', label: '-: Zoom Out'}
   ];
-  x = width / 2 - textWidth(navigationText) / 2;
-  y = bottomBoxY + boxHeight / 2 - actualFontSize / 2;
+  // Cache navigation text width/font size
+  if (!window._lastNavTextWidth || window._lastNavTextWidthW !== width) {
+    let navFontSize = instructionFontSize;
+    textSize(navFontSize);
+    let cachedNavWidth = textWidth(navigationText);
+    while (cachedNavWidth > maxTextWidth && navFontSize > 10) {
+      navFontSize -= 1;
+      textSize(navFontSize);
+      cachedNavWidth = textWidth(navigationText);
+    }
+    window._lastNavTextWidth = cachedNavWidth;
+    window._lastNavTextFontSize = navFontSize;
+    window._lastNavTextWidthW = width;
+  }
+  let navFontSize = window._lastNavTextFontSize || instructionFontSize;
+  x = width / 2 - window._lastNavTextWidth / 2;
+  y = bottomBoxY + boxHeight / 2 - navFontSize / 2;
   for (let i = 0; i < navKeys.length; i++) {
     let keyLabel = navKeys[i].key;
     let label = navKeys[i].label;
     let keyText = label;
     let tw = textWidth(keyText + '   ');
-    let region = {x, y, w: tw, h: actualFontSize + 8, key: keyLabel, isRegion: !!navKeys[i].isRegion};
+    let region = {x, y, w: tw, h: navFontSize + 8, key: keyLabel, isRegion: !!navKeys[i].isRegion};
     window._instructionBarRegions.push(region);
-    let isHovered = mouseX >= x && mouseX <= x + tw && mouseY >= y && mouseY <= y + actualFontSize + 8 && mouseInViewport;
-    let isTouchActive = window._lastTouch && window._lastTouch.x >= x && window._lastTouch.x <= x + tw && window._lastTouch.y >= y && window._lastTouch.y <= y + actualFontSize + 8;
+    let isHovered = mouseX >= x && mouseX <= x + tw && mouseY >= y && mouseY <= y + navFontSize + 8 && mouseInViewport;
+    let isTouchActive = window._lastTouch && window._lastTouch.x >= x && window._lastTouch.x <= x + tw && window._lastTouch.y >= y && window._lastTouch.y <= y + navFontSize + 8;
     if (isHovered || isTouchActive) {
       fill(255, 255, 0);
     } else {
@@ -653,6 +847,9 @@ function drawInstructions() {
     x += tw;
   }
 }
+/**
+ * Draws the current mouse coordinates (longitude, latitude) on the screen.
+ */
 function drawMouseCoords() {
   setMainFont();
   let bufferX = offsetX + (mouseX - width / 2);
@@ -671,6 +868,9 @@ function drawMouseCoords() {
 // =========================
 // 7. Object Generation
 // =========================
+/**
+ * Adds a new nebula at the given galaxy coordinates.
+ */
 function addNebula(x, y, doRedraw = true) {
 // ===== 6. OBJECT GENERATION & UTILITIES =====
   // Nebula: visually large, but smaller than galaxy
@@ -699,6 +899,76 @@ function addNebula(x, y, doRedraw = true) {
     armSpreads[i] = random(0.2, 6.2);
   }
   const nebulaSeed = random(10000);
+  // Precompute all points for this nebula for fast redraws
+  let layersData = [];
+  for (let layer = 0; layer < layers; layer++) {
+    const layerSeed = layerSeeds[layer];
+    const points = 180 + int(random(-40, 60));
+    const layerRad = layerRads[layer] * 0.65;
+    const layerAlpha = layerAlphas[layer];
+    const armSpread = armSpreads[layer] * 0.6;
+    let cloudGroups = int(random(2, 5));
+    let cloudData = [];
+    for (let g = 0; g < cloudGroups; g++) {
+      let cx = x + random(-layerRad * 0.9, layerRad * 0.9);
+      let cy = y + random(-layerRad * 0.9, layerRad * 0.9);
+      let groupRad = layerRad * random(0.28, 0.65);
+      let groupPoints = int(points / cloudGroups * random(1.2, 2.2));
+      let groupCloud = [];
+      for (let i = 0; i < Math.floor(groupPoints / 4); i++) {
+        let px = cx + random(-groupRad, groupRad) + random(-18, 18);
+        let py = cy + random(-groupRad, groupRad) + random(-18, 18);
+        let colorType = random();
+        let col = getNebulaColor(colorType, baseHue, hueSpread);
+        let distFromCore = dist(px, py, x, y);
+        let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+        let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 7.2, 38) * density * random(1.1, 1.7);
+        let strokeCol = color(red(col) + random(-40,40), green(col) + random(-40,40), blue(col) + random(-40,40), alpha);
+        let sw = random(1.2, 2.2) * 1.25 * 1.25;
+        groupCloud.push({px, py, strokeCol, sw});
+      }
+      cloudData.push(groupCloud);
+    }
+    // Filaments
+    let filamentCount = int(random(4, 9));
+    let filamentData = [];
+    for (let f = 0; f < filamentCount; f++) {
+      let fx = x + random(-layerRad * 0.6, layerRad * 0.6);
+      let fy = y + random(-layerRad * 0.6, layerRad * 0.6);
+      let filamentLen = layerRad * random(1.2, 2.2);
+      let filamentAngle = random(TWO_PI);
+      let filamentPoints = [];
+      for (let i = 0; i < Math.floor(points / 16); i++) {
+        let t = i / (points / 4);
+        let px = fx + cos(filamentAngle) * filamentLen * t + random(-8, 8);
+        let py = fy + sin(filamentAngle) * filamentLen * t + random(-8, 8);
+        let colorType = random();
+        let col = getNebulaColor(colorType, baseHue, hueSpread);
+        let distFromCore = dist(px, py, x, y);
+        let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
+        let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 8.2, 28) * density * random(1.1, 2.0);
+        let strokeCol = color(red(col) + random(-60,60), green(col) + random(-60,60), blue(col) + random(-60,60), alpha);
+        let sw = random(1.2, 2.2) * 1.25 * 1.25;
+        filamentPoints.push({px, py, strokeCol, sw});
+      }
+      filamentData.push(filamentPoints);
+    }
+    layersData.push({cloudData, filamentData});
+  }
+  // Knots
+  const knotCount = int(nebSize * 0.25 * shapeFactor);
+  let knotData = [];
+  for (let i = 0; i < Math.floor(knotCount / 4); i++) {
+    let angle = random(TWO_PI);
+    let rad = random(nebSize * 0.15, nebSize * 0.7);
+    let px = x + cos(angle) * rad + random(-8, 8);
+    let py = y + sin(angle) * rad * random(0.85, 1.05) + random(-8, 8);
+    let colorType = random();
+    let col = getNebulaColor(colorType, baseHue, hueSpread);
+    let strokeCol = color(red(col), green(col), blue(col), random(230, 255));
+    let sw = random(1.5, 3.2) * 1.25 * 1.25;
+    knotData.push({px, py, strokeCol, sw});
+  }
   nebulae.push({
     x, y, r: nebSize, baseHue, baseSat, baseBri, hueSpread, shapeFactor,
     col: color(baseHue, baseSat, baseBri, 80),
@@ -710,10 +980,15 @@ function addNebula(x, y, doRedraw = true) {
     layerAlphas,
     armCounts,
     armSpreads,
-    nebulaSeed
+    nebulaSeed,
+    layersData,
+    knotData
   });
   if (doRedraw) redrawBuffer();
 }
+/**
+ * Adds a new galaxy at the given galaxy coordinates.
+ */
 function addGalaxy(x, y, doRedraw = true) {
   // Galaxy: largest object
   const minDim = Math.min(windowWidth, windowHeight);
@@ -744,6 +1019,63 @@ function addGalaxy(x, y, doRedraw = true) {
   // Clump seeds for realism
   const clumpSeeds = new Float32Array(arms);
   for (let i = 0; i < arms; i++) clumpSeeds[i] = random(10000);
+  // Precompute all points for this galaxy for fast redraws
+  let corePoints = Math.floor(points * 0.18);
+  let coreData = [];
+  for (let i = 0; i < corePoints; i++) {
+    let t = i / corePoints;
+    let angle = random(TWO_PI);
+    let rad = random(0, gSize * 0.13 * (0.7 + 0.5 * t));
+    let px = x + cos(angle) * rad;
+    let py = y + sin(angle) * rad;
+    let col = getGalaxyColor(t, gHue);
+    col.setAlpha(255 - t * 60);
+    coreData.push({px, py, col});
+  }
+  // Arms
+  let spiralA = 0.16 + random(-0.03, 0.03);
+  let spiralB = 0.44 + random(-0.08, 0.08);
+  let armsData = [];
+  for (let arm = 0; arm < arms; arm++) {
+    const armSeed = armSeeds[arm];
+    const armAngle = armAngles[arm];
+    const clumpSeed = clumpSeeds[arm];
+    let armLen = Math.floor(points * 0.82 / arms);
+    let armPoints = [];
+    for (let i = 0; i < armLen; i++) {
+      let t = i / armLen;
+      let theta = t * 4.5 * PI + random(-0.04, 0.04);
+      let spiralR = spiralA * exp(spiralB * theta);
+      let baseRad = gSize * spiralR * (0.7 + 0.3 * t);
+      let angle = armAngle + theta + sin(armSeed + t * 12.0) * 0.13;
+      let clump = 1.0 + 0.7 * noise(clumpSeed + t * 2.5) + (random() < 0.08 ? random(0.7, 2.2) : 0);
+      let rad = baseRad * clump;
+      let bulge = exp(-pow(t * 2.1, 2)) * gSize * bulgeFactors[i % bulgeFactors.length];
+      let dust = sin(angle * 2.5 + t * 8) * dustFactors[i % dustFactors.length] * gSize * (1 - t);
+      let px = x + cos(angle) * (rad + bulge + dust);
+      let py = y + sin(angle) * (rad + bulge + dust);
+      let col = getGalaxyColor(t, gHue);
+      let alpha = lerp(255, 80, t) * (0.8 + 0.7 * noise(clumpSeed + t * 3.5));
+      col.setAlpha(alpha);
+      let drawIt = (random() < lerp(1, 0.45, t));
+      let dustLane = (random() < 0.04 && t > 0.3 && t < 0.9);
+      armPoints.push({px, py, col, drawIt, dustLane, angle, t});
+    }
+    armsData.push(armPoints);
+  }
+  // Halo
+  let haloPoints = Math.floor(points * 0.12);
+  let haloData = [];
+  for (let i = 0; i < haloPoints; i++) {
+    let t = i / haloPoints;
+    let angle = random(TWO_PI);
+    let rad = gSize * (0.9 + random(0.1, 0.7));
+    let px = x + cos(angle) * rad + random(-8, 8);
+    let py = y + sin(angle) * rad + random(-8, 8);
+    let col = getGalaxyColor(t, gHue);
+    col.setAlpha(random(40, 90));
+    haloData.push({px, py, col});
+  }
   galaxies.push({
     x, y, r: gSize, arms, baseHue: gHue, baseSat: gSat, baseBri: gBri,
     name: generateName("galaxy"),
@@ -753,7 +1085,10 @@ function addGalaxy(x, y, doRedraw = true) {
     armAngles,
     bulgeFactors,
     dustFactors,
-    clumpSeeds
+    clumpSeeds,
+    coreData,
+    armsData,
+    haloData
   });
   if (doRedraw) redrawBuffer();
 }
@@ -792,83 +1127,42 @@ function drawGalaxy(g) {
   galaxyBuffer.translate(g.x, g.y);
   galaxyBuffer.rotate(g.rotation || 0);
   galaxyBuffer.translate(-g.x, -g.y);
-  const armsLen = g.arms;
-  const pointsLen = g.points;
-  const r = g.r;
-  const bulgeFactors = g.bulgeFactors;
-  const dustFactors = g.dustFactors;
-  const clumpSeeds = g.clumpSeeds;
-  // Draw core: dense, bright, color gradient (use old color function for core)
-  let corePoints = Math.floor(pointsLen * 0.18);
-  for (let i = 0; i < corePoints; i++) {
-    let t = i / corePoints;
-    let angle = random(TWO_PI);
-    let rad = random(0, r * 0.13 * (0.7 + 0.5 * t));
-    let px = g.x + cos(angle) * rad;
-    let py = g.y + sin(angle) * rad;
-    let col = getGalaxyColor(t, g.baseHue);
-  col.setAlpha(255 - t * 60); // Brighter core and arms
-    galaxyBuffer.stroke(col);
+  // Draw precomputed core
+  for (let i = 0; i < g.coreData.length; i++) {
+    let d = g.coreData[i];
+    galaxyBuffer.stroke(d.col);
     galaxyBuffer.strokeWeight(2.8);
-    galaxyBuffer.point(px, py);
+    galaxyBuffer.point(d.px, d.py);
   }
-  // Draw arms: logarithmic spiral, clumpy, color-varying (use old color function)
-  // Make spiral arms more pronounced and tighter
-  let spiralA = 0.16 + random(-0.03, 0.03); // tighter spiral
-  let spiralB = 0.44 + random(-0.08, 0.08); // more spiral turns
-  for (let arm = 0; arm < armsLen; arm++) {
-    const armSeed = g.armSeeds[arm];
-    const armAngle = g.armAngles[arm];
-    const clumpSeed = clumpSeeds[arm];
-    let armLen = Math.floor(pointsLen * 0.82 / armsLen);
-    for (let i = 0; i < armLen; i++) {
-      let t = i / armLen;
-      // Logarithmic spiral: r = a * exp(b * theta)
-      let theta = t * 4.5 * PI + random(-0.04, 0.04);
-      let spiralR = spiralA * exp(spiralB * theta);
-      let baseRad = r * spiralR * (0.7 + 0.3 * t);
-      let angle = armAngle + theta + sin(armSeed + t * 12.0) * 0.13;
-      // Clumping: use noise for natural gaps and random clusters
-      let clump = 1.0 + 0.7 * noise(clumpSeed + t * 2.5) + (random() < 0.08 ? random(0.7, 2.2) : 0);
-      let rad = baseRad * clump;
-      // Bulge and dust
-      let bulge = exp(-pow(t * 2.1, 2)) * r * bulgeFactors[i % bulgeFactors.length];
-      let dust = sin(angle * 2.5 + t * 8) * dustFactors[i % dustFactors.length] * r * (1 - t);
-      let px = g.x + cos(angle) * (rad + bulge + dust);
-      let py = g.y + sin(angle) * (rad + bulge + dust);
-      let col = getGalaxyColor(t, g.baseHue);
-  let alpha = lerp(255, 80, t) * (0.8 + 0.7 * noise(clumpSeed + t * 3.5));
-  col.setAlpha(alpha);
-      galaxyBuffer.stroke(col);
-      galaxyBuffer.strokeWeight(2.8);
-      // Only draw some points for sparser arms
-      if (random() < lerp(1, 0.45, t)) {
-        galaxyBuffer.point(px, py);
+  // Draw precomputed arms
+  for (let arm = 0; arm < g.armsData.length; arm++) {
+    let armPoints = g.armsData[arm];
+    for (let i = 0; i < armPoints.length; i++) {
+      let d = armPoints[i];
+      if (d.drawIt) {
+        galaxyBuffer.stroke(d.col);
+        galaxyBuffer.strokeWeight(2.8);
+        galaxyBuffer.point(d.px, d.py);
       }
-      // Occasional dust lane (darken)
-      if (random() < 0.04 && t > 0.3 && t < 0.9) {
+      if (d.dustLane) {
         galaxyBuffer.stroke(30, 30, 40, 60);
         galaxyBuffer.strokeWeight(2.7);
-        galaxyBuffer.point(px + random(-2,2), py + random(-2,2));
+        galaxyBuffer.point(d.px + random(-2,2), d.py + random(-2,2));
       }
     }
   }
-  // Faint halo: random outliers
-  let haloPoints = Math.floor(pointsLen * 0.12);
-  for (let i = 0; i < haloPoints; i++) {
-    let t = i / haloPoints;
-    let angle = random(TWO_PI);
-    let rad = r * (0.9 + random(0.1, 0.7));
-    let px = g.x + cos(angle) * rad + random(-8, 8);
-    let py = g.y + sin(angle) * rad + random(-8, 8);
-    let col = getGalaxyColor(t, g.baseHue);
-  col.setAlpha(random(40, 90));
-    galaxyBuffer.stroke(col);
+  // Draw precomputed halo
+  for (let i = 0; i < g.haloData.length; i++) {
+    let d = g.haloData[i];
+    galaxyBuffer.stroke(d.col);
     galaxyBuffer.strokeWeight(2.2);
-    galaxyBuffer.point(px, py);
+    galaxyBuffer.point(d.px, d.py);
   }
   galaxyBuffer.pop();
 }
+/**
+ * Adds a new black hole at the given galaxy coordinates.
+ */
 function addBlackhole(x, y, doRedraw = true) {
   // Black hole: visually tiny
   const minDim = Math.min(windowWidth, windowHeight);
@@ -993,6 +1287,9 @@ function drawBlackhole(bh) {
   }
   galaxyBuffer.pop();
 }
+/**
+ * Adds a new star cluster at the given galaxy coordinates.
+ */
 function addStarCluster(x, y) {
   const count = int(random(15, 35));
   // Star cluster: similar to nebula, but slightly smaller
@@ -1043,6 +1340,9 @@ function drawStarCluster(sc) {
   }
   galaxyBuffer.pop();
 }
+/**
+ * Adds a new pulsar at the given galaxy coordinates.
+ */
 function addPulsar(x, y) {
   // Pulsar: visually tiny, similar to black hole
   const minDim = Math.min(windowWidth, windowHeight);
@@ -1095,6 +1395,9 @@ function drawPulsar(p) {
   }
   galaxyBuffer.pop();
 }
+/**
+ * Adds a new quasar at the given galaxy coordinates.
+ */
 function addQuasar(x, y) {
   // Quasar: between star cluster and nebula
   const minDim = Math.min(windowWidth, windowHeight);
@@ -1158,6 +1461,9 @@ function drawQuasar(q) {
   }
   galaxyBuffer.pop();
 }
+/**
+ * Redraws the static background buffer with all objects and stars.
+ */
 function redrawBuffer() {
   galaxyBuffer.background(5, 5, 5);
   galaxyBuffer.blendMode(ADD);
@@ -1217,81 +1523,43 @@ function drawNebula(n) {
   galaxyBuffer.translate(n.x, n.y);
   galaxyBuffer.rotate(n.rotation || 0);
   galaxyBuffer.translate(-n.x, -n.y);
-  const layersLen = n.layers;
-  for (let layer = 0; layer < layersLen; layer++) {
-    const layerSeed = n.layerSeeds[layer];
-    const points = 180 + int(random(-40, 60));
-    const layerRad = n.layerRads[layer] * 0.65; // reduce spread for compactness
-    const layerAlpha = n.layerAlphas[layer];
-    const armCount = n.armCounts[layer];
-    const armSpread = n.armSpreads[layer] * 0.6; // tighten filaments
-    // --- Mix polar and cartesian clouds, filaments, and voids ---
-  let cloudGroups = int(random(2, 5)); // fewer, larger clusters
-    for (let g = 0; g < cloudGroups; g++) {
-  let cx = n.x + random(-layerRad * 0.9, layerRad * 0.9);
-  let cy = n.y + random(-layerRad * 0.9, layerRad * 0.9);
-  let groupRad = layerRad * random(0.28, 0.65); // larger clusters
-  let groupPoints = int(points / cloudGroups * random(1.2, 2.2)); // denser clusters
-      for (let i = 0; i < Math.floor(groupPoints / 4); i++) {
-        // Cartesian cluster
-        let px = cx + random(-groupRad, groupRad) + random(-18, 18);
-        let py = cy + random(-groupRad, groupRad) + random(-18, 18);
-        if (random() < 0.7) {
-          let colorType = random();
-          let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
-          let distFromCore = dist(px, py, n.x, n.y);
-          let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
-          let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 7.2, 38) * density * random(1.1, 1.7);
-          galaxyBuffer.stroke(red(col) + random(-40,40), green(col) + random(-40,40), blue(col) + random(-40,40), alpha);
-          galaxyBuffer.strokeWeight(random(1.2, 2.2) * 1.25 * 1.25);
-          galaxyBuffer.point(px, py);
-        }
+  // Draw precomputed layers
+  for (let layer = 0; layer < n.layersData.length; layer++) {
+    let {cloudData, filamentData} = n.layersData[layer];
+    for (let g = 0; g < cloudData.length; g++) {
+      let groupCloud = cloudData[g];
+      for (let i = 0; i < groupCloud.length; i++) {
+        let d = groupCloud[i];
+        galaxyBuffer.stroke(d.strokeCol);
+        galaxyBuffer.strokeWeight(d.sw);
+        galaxyBuffer.point(d.px, d.py);
       }
     }
-    // --- Add filaments ---
-  let filamentCount = int(random(4, 9)); // more filaments
-    for (let f = 0; f < filamentCount; f++) {
-      let fx = n.x + random(-layerRad * 0.6, layerRad * 0.6);
-      let fy = n.y + random(-layerRad * 0.6, layerRad * 0.6);
-  let filamentLen = layerRad * random(1.2, 2.2); // longer filaments
-      let filamentAngle = random(TWO_PI);
-      for (let i = 0; i < Math.floor(points / 16); i++) {
-        let t = i / (points / 4);
-        let px = fx + cos(filamentAngle) * filamentLen * t + random(-8, 8);
-        let py = fy + sin(filamentAngle) * filamentLen * t + random(-8, 8);
-        if (random() < 0.5) {
-          let colorType = random();
-          let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
-          let distFromCore = dist(px, py, n.x, n.y);
-          let density = exp(-pow(distFromCore / (layerRad * 0.8), 2));
-          let alpha = map(distFromCore, 0, layerRad * 1.1, layerAlpha * 8.2, 28) * density * random(1.1, 2.0);
-          galaxyBuffer.stroke(red(col) + random(-60,60), green(col) + random(-60,60), blue(col) + random(-60,60), alpha);
-          galaxyBuffer.strokeWeight(random(1.2, 2.2) * 1.25 * 1.25);
-          galaxyBuffer.point(px, py);
-        }
+    for (let f = 0; f < filamentData.length; f++) {
+      let filamentPoints = filamentData[f];
+      for (let i = 0; i < filamentPoints.length; i++) {
+        let d = filamentPoints[i];
+        galaxyBuffer.stroke(d.strokeCol);
+        galaxyBuffer.strokeWeight(d.sw);
+        galaxyBuffer.point(d.px, d.py);
       }
     }
-    // --- Leave voids/gaps by skipping some regions ---
-    // (No code needed, just don't fill everywhere)
   }
-  // Add some scattered knots and filaments (more compact)
-  const knotCount = int(n.r * 0.25 * n.shapeFactor);
-  for (let i = 0; i < Math.floor(knotCount / 4); i++) {
-    let angle = random(TWO_PI);
-    let rad = random(n.r * 0.15, n.r * 0.7);
-    let px = n.x + cos(angle) * rad + random(-8, 8);
-    let py = n.y + sin(angle) * rad * random(0.85, 1.05) + random(-8, 8);
-    let colorType = random();
-    let col = getNebulaColor(colorType, n.baseHue, n.hueSpread);
-  galaxyBuffer.stroke(red(col), green(col), blue(col), random(230, 255));
-    galaxyBuffer.strokeWeight(random(1.5, 3.2) * 1.25 * 1.25);
-    galaxyBuffer.point(px, py);
+  // Draw precomputed knots
+  for (let i = 0; i < n.knotData.length; i++) {
+    let d = n.knotData[i];
+    galaxyBuffer.stroke(d.strokeCol);
+    galaxyBuffer.strokeWeight(d.sw);
+    galaxyBuffer.point(d.px, d.py);
   }
   galaxyBuffer.pop();
 }
 // =========================
 // 9. Mouse & Keyboard Interaction
 // =========================
+/**
+ * Handles mouse press events for UI, object selection, and creation.
+ */
 function mousePressed() {
   // Check if click is on instruction bar region
   if (window._instructionBarRegions) {
@@ -1354,6 +1622,9 @@ function mousePressed() {
           keyPressed();
         } else if (region.action === 'info') {
           key = 'i'; keyCode = 73; keyPressed();
+        } else if (region.action === 'grid') {
+          showGrid = !showGrid;
+          return false;
         }
         return false;
       }
@@ -1361,6 +1632,7 @@ function mousePressed() {
   }
 // ===== 7. INTERACTION HANDLERS =====
 // ===== 8. ANIMATION & STATE HELPERS =====
+// ...existing code...
   // Only handle info overlay close logic here
   if (showInfoOverlay) {
     let boxW = min(width * 0.7, 520);
@@ -1433,6 +1705,9 @@ function mousePressed() {
     // Do not clear selection until reverse animation completes
   }
 }
+/**
+ * Handles mouse drag events for panning.
+ */
 function mouseDragged() {
   if (dragging) {
     let dx = mouseX - lastMouseX;
@@ -1447,11 +1722,17 @@ function mouseDragged() {
     offsetY = constrain(offsetY, 0, galaxyH);
   }
 }
+/**
+ * Handles mouse release events for ending drag and applying momentum.
+ */
 function mouseReleased() {
   dragging = false;
   panVX = panVXAvg;
   panVY = panVYAvg;
 }
+/**
+ * Handles keyboard events for all controls, creation, and UI toggles.
+ */
 function keyPressed() {
   // Ctrl+S: Save canvas without UI, all labels shown (no borders)
   if ((key === 's' || key === 'S') && (keyIsDown(CONTROL) || keyIsDown(17))) {
@@ -1534,7 +1815,12 @@ function keyPressed() {
     labelLineEnd = prevLabelLineEnd;
     return false;
   }
-  // Always handle info overlay toggle first
+  // Always handle grid toggle first
+  if (key === 'g' || key === 'G') {
+    showGrid = !showGrid;
+    return false;
+  }
+  // Always handle info overlay toggle next
   if (key === 'i' || key === 'I') {
     showInfoOverlay = !showInfoOverlay;
     if (showInfoOverlay) {
@@ -1723,6 +2009,9 @@ function keyPressed() {
     }
   }
 }
+/**
+ * Handles key release events for stopping panning.
+ */
 function keyReleased() {
   if ([LEFT_ARROW, RIGHT_ARROW, UP_ARROW, DOWN_ARROW].includes(keyCode) ||
       ['a','A','d','D','w','W','s','S'].includes(key)) {
@@ -1732,6 +2021,9 @@ function keyReleased() {
 // =========================
 // 10. Touch Interaction Support
 // =========================
+/**
+ * Handles touch start events for mobile/touch panning and selection.
+ */
 function touchStarted() {
   if (showLanding && !starExploding) {
     let cx = width / 2;
@@ -1754,6 +2046,9 @@ function touchStarted() {
   window._touchStartX = touches[0].x;
   window._touchStartY = touches[0].y;
 }
+/**
+ * Handles window resize events to keep the canvas and buffer in sync.
+ */
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
   // Recenter viewport
@@ -1762,6 +2057,9 @@ function windowResized() {
   redrawBuffer();
 }
 // Touch move: smooth panning with momentum
+/**
+ * Handles touch move events for smooth panning.
+ */
 function touchMoved() {
   if (dragging && touches.length > 0) {
     let dx = touches[0].x - lastTouchX;
@@ -1778,6 +2076,9 @@ function touchMoved() {
   return false;
 }
 
+/**
+ * Handles touch end events for tap-to-select and ending drag.
+ */
 function touchEnded() {
   dragging = false;
   panVX = panVXAvg;
@@ -1803,33 +2104,41 @@ function touchEnded() {
 // =========================
 // Debugging & Testing
 // =========================
-function keyTyped() {
-  if (key === 'd') {
-    // Debug: Print object counts
-    console.log(`Nebulae: ${nebulae.length}, Galaxies: ${galaxies.length}, Blackholes: ${blackholes.length}, Star Clusters: ${starClusters.length}, Pulsars: ${pulsars.length}, Quasars: ${quasars.length}`);
-  }
-}
+// (keyTyped debug print removed for production)
+// ...existing code...
 // =========================
 // Task Bar
 // =========================
+/**
+ * Draws the left task bar with action buttons and clickable regions.
+ */
 function drawTaskBar() {
   // Store clickable regions for mousePressed
   if (!window._taskBarRegions) window._taskBarRegions = [];
   window._taskBarRegions.length = 0;
   // Task bar settings
-  let barWidth = Math.max(120, Math.min(0.13 * width, 160));
-  let buttonHeight = Math.max(28, Math.min(0.045 * height, 44));
+  // Task bar width adapts to window size, but never too small
+  let barWidth = Math.max(90, Math.min(0.13 * width, Math.max(120, Math.min(160, width * 0.18))));
+  // Task bar button height adapts to window size
+  let buttonHeight = Math.max(24, Math.min(0.045 * height, Math.max(36, Math.min(44, height * 0.07))));
   setMainFont();
   let fontSize = instructionFontSize;
   let buttons = [
-    { label: 'Size: E', key: 'e', action: 'size' },
-    { label: 'Density: R', key: 'r', action: 'density' },
-    { label: 'Color: T', key: 't', action: 'color' },
-    { label: 'Delete: Tab', key: 'tab', action: 'deleteSelected' },
-    { label: 'Restart: Esc', key: 'escape', action: 'restart' },
-    { label: 'Info: I', key: 'i', action: 'info' },
-    { label: 'Save: Ctrl+S', key: 'ctrls', action: 'save' }
+    { label: 'Resize (E)', key: 'e', action: 'size' },
+    { label: 'Density (R)', key: 'r', action: 'density' },
+    { label: 'Color (T)', key: 't', action: 'color' },
+    { label: 'Delete (Tab)', key: 'tab', action: 'deleteSelected' },
+    { label: 'Restart (Esc)', key: 'escape', action: 'restart' },
+    { label: 'Info (I)', key: 'i', action: 'info' },
+    { label: 'Save (Ctrl+S)', key: 'ctrls', action: 'save' },
+    { label: 'Grid (G)', key: 'g', action: 'grid' }
   ];
+  // Cache button label widths for this width/fontSize
+  if (!window._taskBarLabelWidths || window._taskBarLabelWidthsW !== width || window._taskBarLabelWidthsFS !== fontSize) {
+    window._taskBarLabelWidths = buttons.map(b => textWidth(b.label));
+    window._taskBarLabelWidthsW = width;
+    window._taskBarLabelWidthsFS = fontSize;
+  }
   // Center vertically
   let totalBarHeight = buttons.length * buttonHeight;
   let barY = (height - totalBarHeight) / 2;
@@ -1851,10 +2160,14 @@ function drawTaskBar() {
     } else {
       fill(255);
     }
+    // Use cached label width if needed (not strictly necessary for draw, but for future layout)
     text(buttons[i].label, bx + padding, by + buttonHeight / 2);
   }
   // (No click handling here; handled in mousePressed)
 }
+/**
+ * Draws the animated info overlay with typing effect.
+ */
 function drawInfoOverlay() {
   // Animate swipe (slide up/down)
   infoOverlayTarget = showInfoOverlay ? 1 : 0;
@@ -1863,8 +2176,9 @@ function drawInfoOverlay() {
   if (infoOverlayAnim < 0.01) return;
   push();
   // Overlay dimensions and style
-  let boxW = min(width * 0.9, 600);
-  let boxH = min(height * 0.8, 400);
+  // Info overlay box adapts to window size, always readable
+  let boxW = min(width * 0.96, Math.max(340, Math.min(600, width * 0.9)));
+  let boxH = min(height * 0.92, Math.max(220, Math.min(400, height * 0.8)));
   let paddingX = 32;
   let paddingY = 32;
   // Slide in from left
@@ -1892,20 +2206,20 @@ function drawInfoOverlay() {
   }
   textAlign(LEFT, CENTER);
   textSize(instructionFontSize * 1.6);
-  let title = 'Point Zer0';
+  let title = 'Point Zer0: Interactive Galaxy Map';
   let titleH = instructionFontSize * 2.5;
   text(title, boxX + paddingX, boxY + paddingY, boxW - 2 * paddingX, titleH);
   // Info text (with typing effect)
   textSize(instructionFontSize * 1.08);
   let infoText =
-    'The project is based on the Big Bang Theory (Georges Lemaître 1927):\n\n' +
-    'The universe began as an extremely hot, dense point (a singularity) approximately 13.8 billion years ago, and it has been expanding ever since.\n\n' +
-    'This website allows users to create a custom map of their own universe — it is your canvas! Go wild, create a universe to your liking, and most importantly: have fun!\n\n' +
+    'Inspired by the Big Bang Theory (Georges Lemaître, 1927):\n\n' +
+    'The universe began as an extremely hot, dense point (a singularity) about 13.8 billion years ago, and has been expanding ever since.\n\n' +
+    'This interactive map lets you create your own universe. Add galaxies, nebulae, and more—explore, experiment, and have fun!\n\n' +
     '- Nguyen Trong Tin';
   let infoY = boxY + paddingY + titleH + instructionFontSize * 0.7;
   let infoH = boxH - (infoY - boxY) - paddingY;
   // Typing effect
-  let charsPerSec = 120;
+  let charsPerSec = 150;
   let elapsed = (millis() - infoOverlayStartTime) / 1000;
   let maxChars = min(infoText.length, Math.floor(elapsed * charsPerSec));
   let displayText = infoText.substring(0, maxChars);
@@ -1917,3 +2231,77 @@ function drawInfoOverlay() {
 }
 
 // Mouse wheel scroll for info overlay
+function mouseWheel(event) {
+  if (showInfoOverlay) {
+    // Prevent default scrolling behavior
+    return false;
+  }
+  // Zoom in/out with mouse wheel
+  let zoomStep = 0.08;
+  if (event.delta > 0) {
+    // Scroll down: zoom out
+    zoomLevel = constrain(zoomLevel - zoomStep, 0.2, 2.0);
+  } else if (event.delta < 0) {
+    // Scroll up: zoom in
+    zoomLevel = constrain(zoomLevel + zoomStep, 0.2, 2.0);
+  }
+  // Prevent page scroll
+  return false;
+}
+
+/**
+ * Draws the latitude/longitude grid overlay with labels.
+ */
+function drawGrid() {
+  // Only redraw gridBuffer if zoom/pan/size changes
+  const zl = zoomLevel, ox = offsetX, oy = offsetY, w = width, h = height;
+  let needsRedraw = false;
+  if (!gridBuffer ||
+      gridBufferParams.zoom !== zl ||
+      gridBufferParams.offsetX !== ox ||
+      gridBufferParams.offsetY !== oy ||
+      gridBufferParams.width !== w ||
+      gridBufferParams.height !== h) {
+    needsRedraw = true;
+  }
+  if (needsRedraw) {
+    gridBuffer = createGraphics(w, h);
+    gridBuffer.clear();
+    gridBuffer.push();
+    gridBuffer.stroke(255, 255, 255, 160);
+    gridBuffer.strokeWeight(1.2 * zl);
+    gridBuffer.textSize(14 * zl);
+    gridBuffer.fill(255, 255, 255, 200);
+    // Longitude lines
+    for (let lon = -180; lon <= 180; lon += 10) {
+      let gx = map(lon, -180, 180, 0, galaxyW);
+      let sx = (gx - ox) * zl + w / 2;
+      gridBuffer.line(sx, 0, sx, h);
+      if (sx >= 0 && sx <= w) {
+        gridBuffer.textAlign(CENTER, TOP);
+        gridBuffer.text(lon + "°", sx, 2);
+        gridBuffer.textAlign(CENTER, BOTTOM);
+        gridBuffer.text(lon + "°", sx, h - 2);
+      }
+    }
+    // Latitude lines
+    for (let lat = -90; lat <= 90; lat += 10) {
+      let gy = map(lat, 90, -90, 0, galaxyH);
+      let sy = (gy - oy) * zl + h / 2;
+      gridBuffer.line(0, sy, w, sy);
+      if (sy >= 0 && sy <= h) {
+        gridBuffer.textAlign(LEFT, CENTER);
+        gridBuffer.text(lat + "°", 2, sy);
+        gridBuffer.textAlign(RIGHT, CENTER);
+        gridBuffer.text(lat + "°", w - 2, sy);
+      }
+    }
+    gridBuffer.pop();
+    gridBufferParams.zoom = zl;
+    gridBufferParams.offsetX = ox;
+    gridBufferParams.offsetY = oy;
+    gridBufferParams.width = w;
+    gridBufferParams.height = h;
+  }
+  image(gridBuffer, 0, 0);
+}
